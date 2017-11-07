@@ -1,0 +1,178 @@
+---
+title: "Practica1 Tecnicas de Clasificacion"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Carga de datos
+Cargamos los datos. Problema de negocio: clasificar individuos como mujeres/hombres en funcion de la experiencia y el salario que perciben. Por lo tanto, nuestro modelo a estimar es Gender~ Experience + Salary.
+```{r}
+
+setwd("C:/Users/Manuel/Desktop/CUNEF/Tecnicas de clasificacion/Practica1-arboles")
+gender <- read.csv("http://www.biz.uiowa.edu/faculty/jledolter/DataMining/GenderDiscrimination.csv")
+head(gender, 6)
+# comprobamos el encabezado de gender 
+## # modelo a estimar Gender~ Experience + Salary
+```
+```{r}
+View(gender)
+#para explorar los datos
+```
+
+Instalacion de los paquetes necesarios para el análisis:
+```{r}
+#install.packages("rpart")
+library(rpart)
+#install.packages("rpart.plot")
+library(rpart.plot)
+#install.packages("partykit")
+library(partykit)
+```
+
+##Creamos muestra aleatoria
+Vamos a utilizar una muestra con set seed previo y definimos una muestra aleatoria de aprendizaje del arbol. Con esto evitamos usar toda la poblacion para no sobrecargar el arbol.
+```{r}
+set.seed(1379)
+train <- sample(nrow(gender), 0.7*nrow(gender))
+#esto me selecciona al azar el 70% de la muestra
+
+gender.train <- gender[train,]   #con los elementos de la muestra que acabo de crear
+gender.validate <- gender[-train,]  #con los elementos restantes
+
+```
+
+Queremos ver la frecuencia de la variable Gender en la muestra train y en la de validacion:
+```{r}
+table(gender.train$Gender) #93 mujeres y 52 hombres
+table(gender.validate$Gender) #47 mujeres y 16 hombres
+```
+
+
+##Estimacion del arbol
+Utilizamos la libreria rpart
+```{r}
+arbol <- rpart(Gender ~ ., data=gender.train, method="class",
+               parms=list(split="information"))
+
+print(arbol) #esta info sera mas completa con la representacion grafica
+summary(arbol)
+```
+
+Representacion grafica
+```{r}
+plotcp(arbol)
+
+prp(arbol, type = 2, extra = 104,
+    fallen.leaves = TRUE, main="Decision Tree")
+
+```
+Como podemos observar, el arbol tiene 4 nodos terminales y tres niveles distintos que hacen split en función de la variable salario y la experiencia. El primer nivel distingue en función de si el salario es superior o inferior a 92300. 
+
+El segundo nivel, que parte del grupo con salario inferior a 92300 (81%), distingue en función de si se tiene una experiencia laboral superior o inferior a 6.5 años. El terce nivel distingue entre aquellos individuos que, con un salario menor a 92300 y una experiencia laboral inferior a 6.5 años, tienen un salario menor o mayor a 70000. 
+
+Llama la atención que en este primer arbol de decisión los individuos con mas de 6.5 años de experiencia y con salario inferior a 92300 sean, en un 86%, mujeres.
+
+
+##Poda del arbol
+Ahora tenemos que podar el arbol. Para ellos nos guiaremos con la tabla de complejidad parametrica.Cogemos el xerror mas pequeño y le hacemos +/- la desv tipica. Si hay algun xerror mas pequeño que lo que nos salga, subo un nivel. Utilizamos la libreria rpart.plot para representar graficamente el arbol
+```{r}
+arbol$cptable
+```
+
+
+Podaremos en el nivel 3 primeramente y, viendo que se vuelve a cumplir la condicion de poda, volveremos a podar otro nivel. Obtenemos el arbol de decision arbol.podado2 con el que seguiremos el proceso.
+```{r}
+arbol.podado <- prune(arbol, cp=0.01923077)
+prp(arbol.podado, type = 2, extra = 104,
+    fallen.leaves = TRUE, main="Decision Tree Podado")
+
+arbol.podado$cptable
+
+arbol.podado2 <- prune(arbol.podado, cp=0.09615385)
+
+prp(arbol.podado2, type = 2, extra = 104,
+    fallen.leaves = TRUE, main="Decision Tree Podado2")
+```
+El arbol que usaremos para clasificar los individuos como hombres y mujeres utiliza solamente el primer criterio. Observamos que el 19% de la muestra cobra mas de 92300, de los cuales el 25% son mujeres y el 75% son hombres. La gran mayoria, el 81%, cobra menos de 92300 siendo el 74% mujeres y el 26% hombres. 
+
+
+##Prediccion con la muestra de validacion con arbol.podado
+
+Para verificar que la segunda poda es fructífera comparemos la capacidad de predicción de arbol.podado y arbol.podado2.
+```{r}
+arbol.pred <- predict(arbol.podado, gender.validate, type="class")
+
+arbol.perf <- table(gender.validate$Gender, arbol.pred,
+                    dnn=c("Actual", "Predicted"))
+
+arbol.perf
+
+```
+Como podemos observar el nº total de errores que comete arbol.podado es 19.
+
+##Prediccion con la muestra de validacion con arbol.podado2
+```{r}
+arbol.pred <- predict(arbol.podado2, gender.validate, type="class")
+
+arbol.perf <- table(gender.validate$Gender, arbol.pred,
+                    dnn=c("Actual", "Predicted"))
+
+arbol.perf
+
+```
+Como podemos observar el numero de errores en arbol.podado2 es 13, menor que en el caso anterior. La segunda poda ha sido correcta.
+
+##Representacion grafica arbol.podado2
+Utilizamos la libreria partykit para graficar
+```{r}
+plot(as.party(arbol.podado2))
+```
+
+Hemos descartado la variable "experiencia" en nuestro arbol de decisión. Distinguiendo 2 nodos fundamentales en función del salario, obtenemos dos nodos con una pureza aceptable. El nodo 1 está compuesto por un 23% aprox. de hombres y un 77% de mujeres. El nodo 3 está compuesto por un 77% aprox de hombres y un 23% de mujeres. 
+
+En este tipo de gráficos tenemos que observar la pureza de los nodos. Deben ser mayoritariamente blancos, o negros. La mezcla en proporciones similares no es buena señal en terminos de pureza y homogeneidad. Como podemos observar, nuestros nodos tienen una composición bastante homogénea.
+
+Podemos interpretar que existe una brecha salarial importante entre hombres y mujeres puesto que la mayoría de los individuos con salario superior a 92300 son hombres y, al contrario, la mayoría de los individuos con salarior inferior a dicha cifra son mujeres. 
+
+Esto podría poner de relevancia uno de los principales conflictos de la sociedad del siglo XXI en los paises dearrollados pero, para poder afirmar si existe discriminación por género, tendríamos que ver si los hombres y mujeres de la muestra trabajan en el mismo sector, misma experiencia y en cargos similares.
+
+
+
+
+## Metodo alternativo - Arboles basados en la inferencia. Conditional Inference Trees
+
+```{r}
+fit.ctree <- ctree(Gender~ Experience + Salary, data=gender.train)
+
+plot(fit.ctree, main="Conditional Inference Tree")
+```
+Los árboles basados en la inferencia (conditional inference tree) constituyen una variante importante de los árboles de decisión tradicional. Los árboles basados en la inferencia son similares a los tradicionales pero las variables y divisiones se basan en la significatividad de algunos contrastes más que en las medidas de puridad u homogeneidad. Así, nos fijaremos en el contraste del pvalor. 
+
+Este arbol utiliza la variable salario (menor o igual y mayor que 90600) como primer criterio de clasificacion. A diferencia del arbol anterior, utiliza la experiencia (menor o igual y mayor que 6) como segundo criterio de clasificación. Da lugar por tanto a 3 nodos terminales, 3, 4 y 5, de 33, 84 y 28 observaciones, respectivamente.
+
+Aunque el nodo 4 y el nodo 5 son bastante homogéneos, el nodo 3 se sitúa en torno a una proporción 60-40, lo que incrementa la probabilidad de error. 
+
+Hemos de comprobar si el arbol basado en la inferencia tiene proporciona una prediccion mas acertada a la hora de clasificar individuos en comparacion a arbol.podado2. 
+```{r}
+ctree.pred <- predict(fit.ctree, gender.validate, type="response")
+
+ctree.perf <- table(gender.validate$Gender, ctree.pred,
+                    dnn=c("Actual", "Predicted"))
+
+ctree.perf
+
+plot(ctree.perf, main="Conditional Inference Tree")
+```
+Como podemos observar el arbol basado en la inferencia da lugar a 20 errores, uno mas que nuestro arbol tradicional tras la primera poda y 7 mas que arbol.podado2. Aun asi, tal y como se observa en el grafico, este arbol permite corroborar la impresion general que generaban los arboles tradicionales:
+        - Existe una brecha salarial, en general las mujeres cobran menos.
+        - Para un mismo nivel de experiencia, los hombres cobran mas.
+        
+Sin embargo, como hemos señalado anteriormente, antes de hacer una afirmación rotunda habría que comprobar la distribución por sectores y cargos para comprobar que los individuos son comparables. 
+
+#modelo robusto: significa que llega a resultados similares por diferentes caminos.
+#modelo parsimonioso: que se explica con un numero reducido de variables.

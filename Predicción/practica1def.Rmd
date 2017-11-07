@@ -1,0 +1,339 @@
+---
+title: "Practica1DEF"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+#Carga y limpieza de datos
+lo primero que hay que hacer es un trabajo previo de visualizacion de los datos, para ver que tenemos, y a continuacion, proceder a la limpieza de aquellas variables que sean irrelevantes para nuestro caso de estudio.
+```{r}
+fondos=read.csv2("C:/Users/Manuel/Desktop/CUNEF/Prediccion/Tarea1/Fondos.csv")
+View(fondos)
+```
+Sustituimos los NA values por los valores mas cercanos.
+```{r}
+library(rminer)
+library(caret)
+fondos2=imputation("hotdeck",fondos)
+View(fondos2)
+
+#por que me da error?
+```
+
+
+
+2ºElimino variables que a simple vista se que no me van a ayudar a explicar la rentabilidad de los fondos, por su contenido.
+Como queremos explicar la rentabilidad en 1 año, de las variables de rentabilidad nos quedaremos con rentabilidad a 3 meses, 6 meses, 1 año, 3 años y 5 años. 
+
+```{r}
+fondos2 <- fondos2[ ,!colnames(fondos2)=="ImportFile_CustomDelayToBuy"]
+fondos2 <- fondos2[ ,!colnames(fondos2)=="ImportFile_CustomBuyFee2"]
+fondos2 <- fondos2[ ,!colnames(fondos2)=="X1_Day_Return"]
+fondos2 <- fondos2[ ,!colnames(fondos2)=="X1_Week_Return"]
+fondos2 <- fondos2[ ,!colnames(fondos2)=="rent_1_mes"]
+fondos2 <- fondos2[ ,!colnames(fondos2)=="rent_10_anios"]
+fondos2 <- fondos2[ ,!colnames(fondos2)=="Dias_depl_reemb"]
+fondos2 <- fondos2[ ,!colnames(fondos2)=="Com_Suscripcion"]
+fondos2 <- fondos2[ ,!colnames(fondos2)=="ISIN"]
+
+```
+
+3ºCompruebo que se aplican los cambios.
+```{r}
+View(fondos2)
+```
+
+
+#Regresión 1
+```{r}
+regresion1=lm(rent_1~1+rent_en_el_anio+Estilo_inversion_RV+rent_en_el_anio:rent_3_anios+Volatilidad_3+Morningstar_Rating,data=fondos2)
+summary(regresion1)
+
+
+```
+como podemos observar, todas las variables son significativas y el R-cuadrado apenas difiere de R-cuadrado ajustado.Este es el resultado de eliminar variables menos significativas como Patrimonio. A pesar de haber sustituido los NA values por los valores mas cercanos, conviene no utilizar variables que previamente tenían muchísimos valores nulos (rentabilidad a 10 años, por ejemplo).
+
+
+##NOrmalidad:QQplot
+Un gráfico Cuantil-Cuantil permite observar cuan cerca está la distribución de un conjunto de datos a alguna distribución ideal o comparar la distribución de dos conjuntos de datos. En este caso queremos ver si sigue la normal.
+```{r}
+library(car)
+qqPlot(regresion1, labels=row.names(fondos2), id.method="identify",
+       simulate=TRUE, main="Q-Q Plot")
+```
+Como podemos observar, parece que nuestra muestra presenta mas valores extremos de los que se esperaría de una distribución normal.
+
+##Histograma + densidad + normal + rugs
+
+```{r}
+residplot <- function(fit, nbreaks=10) {
+  z <- rstudent(fit)
+  hist(z, breaks=nbreaks, freq=FALSE,
+       xlab="Studentized Residual",
+       main="Distribution of Errors")
+  rug(jitter(z), col="brown")
+  curve(dnorm(x, mean=mean(z), sd=sd(z)),
+        add=TRUE, col="blue", lwd=2)
+  lines(density(z)$x, density(z)$y,
+        col="red", lwd=2, lty=2)
+  legend("topright",
+         legend = c( "Normal Curve", "Kernel Density Curve"),
+         lty=1:2, col=c("blue","red"), cex=.7)
+}
+
+residplot(regresion1)
+```
+Como vemos, el gráfico no se parece a la normal. El pico es mucho mas pronunciado, lo que deja entrever que la curva es leptocúrtica (gran curtosis).
+
+
+##Jarque - Bera
+el contraste de normalidad de Jarque-Bera nos da como hipótesis nula, que la distribución es normal:
+```{r}
+vResid<-resid(regresion1)
+library(fBasics)
+library(akima)
+jbTest(vResid)
+```
+como  el p-value es cero, se rechaza la hipótesis nula --> la distribución no es normal.
+
+##Saphiro
+Otra forma de comprobar si una distribucion ha sido generada por una normal es el test de Shapiro-Wilk:
+```{r}
+shapiro.test(vResid)
+```
+Resultado equivalente al de Jarque BeraComo el p-value es cero, la distribucion NO ha sido generada por una distribución normal.
+
+##LINEALIDAD - crPlots
+En esta esta vamos a graficar los valores ajustados respecto a los predictores. Si no hay problemas de linealidad se obtendrá una recta sobre la que se representan los puntos.
+
+Los gráficos representan sobre una linea verde la estimacion, y sobre una roja aquella a la que deberían aproximarse.
+No podemos obtener los gráficos puesto que hay variables asociadas entre si.
+```{r}
+#crPlots(regresion1)
+
+```
+
+##HOMOCEDASTICIDAD - ncvTest
+Partimos de la hipótesis que tenemos homocedasticidad en nuestros errores.
+
+Realizamos el test de Breusch-Pagan:
+```{r}
+ncvTest(regresion1)
+```
+Se acepta la hipótesis nula, el modelo no presenta heterocedasticidad.
+
+##Validacion Global
+A modo de resumen, podemos contrastar todas las hipótesis mediante el test de Peña
+```{r}
+library(gvlma)
+gvmode1<-gvlma(regresion1)
+gvmode1
+```
+Como vemos, el modelo presenta sesgo y curtosis, pero no presenta heterocedasticidad
+
+##Multicolinealidad
+Se define multicolinealidad como la correlación entre predictores, pudiendo causar problemas con los estimadores.
+
+Para ver si existe multicolinealidad, utilizamos la función VIF (Factor de inflación de la varianza).
+
+En los casos en los que la raíz cuadrada de VIF es mayor de 2, se considera que existen problemas de multicolinealidad.
+```{r}
+vif(regresion1)
+
+```
+```{r}
+sqrt(vif(regresion1)) > 2
+```
+Como podemos observar, no tenemos multicolinealidad.
+
+##Observaciones anómalas
+Mediante el test de Boniferri identificamos los valores atípicos. Se analiza el mayor de los residuos, y si este no es atípico, se asume que no hay atípicos en la muestra.
+```{r}
+outlierTest(regresion1)
+
+```
+Existen distintos outliers en la muestra, 7 concretamente. 
+
+
+Determinacion de valores extremos (hat statistic):
+  - p: numero de parametros estimados
+  - n: tamaño de la muestra
+  
+  Las bservaciones con valor 2 o 3 veces el valor de la media se consideran extremas
+```{r}
+hat.plot <- function(fit) {
+  p <- length(coefficients(fit))
+  n <- length(fitted(fit))
+  plot(hatvalues(fit), main="Index Plot of Hat Values")
+  abline(h=c(2,3)*p/n, col="red", lty=2)
+  identify(1:n, hatvalues(fit), names(hatvalues(fit)))
+}
+hat.plot(regresion1)
+```
+```{r}
+cutoff <- 4/(nrow(fondos)-length(regresion1$coefficients)-2)
+plot(regresion1, which=4, cook.levels=cutoff)
+abline(h=cutoff, lty=2, col="red")
+```
+```{r}
+influencePlot(regresion1, id.method="identify", main="Influence Plot", 
+              sub="Circle size is proportial to Cook's Distance" )
+```
+
+
+
+#Regresión 2
+```{r}
+regresion2=lm(rent_1~1+rent_en_el_anio+Volatilidad_3+Media_3+rent_en_el_anio:rent_5_anios+rent_en_el_anio:rent_3_anios,data=fondos2)
+summary(regresion2)
+
+
+```
+
+
+##NOrmalidad:QQplot
+
+```{r}
+library(car)
+qqPlot(regresion2, labels=row.names(fondos2), id.method="identify",
+       simulate=TRUE, main="Q-Q Plot")
+```
+
+Como podemos observar, en este caso se repite la sensación de que hay mas valores extremos de los que se esperaría de una distribución normal.
+
+
+##Histograma + densidad + normal + rugs
+
+```{r}
+residplot <- function(fit, nbreaks=10) {
+  z <- rstudent(fit)
+  hist(z, breaks=nbreaks, freq=FALSE,
+       xlab="Studentized Residual",
+       main="Distribution of Errors")
+  rug(jitter(z), col="brown")
+  curve(dnorm(x, mean=mean(z), sd=sd(z)),
+        add=TRUE, col="blue", lwd=2)
+  lines(density(z)$x, density(z)$y,
+        col="red", lwd=2, lty=2)
+  legend("topright",
+         legend = c( "Normal Curve", "Kernel Density Curve"),
+         lty=1:2, col=c("blue","red"), cex=.7)
+}
+
+residplot(regresion2)
+```
+El gráfico muestra claramente que la distribución no es normal y que existe gran curtosis.
+
+
+##Jarque - Bera
+```{r}
+vResid<-resid(regresion2)
+library(fBasics)
+library(akima)
+jbTest(vResid)
+```
+como  el p-value es cero, se rechaza la hipótesis nula --> la distribución no es normal.
+
+
+##Saphiro
+```{r}
+shapiro.test(vResid)
+```
+Se corrobora el resultado anterior
+
+##HOMOCEDASTICIDAD - ncvTest
+```{r}
+ncvTest(regresion2)
+```
+El modelo presenta heterocedasticidad.
+
+##Validacion Global
+```{r}
+library(gvlma)
+gvmode1<-gvlma(regresion2)
+gvmode1
+```
+
+
+##Multicolinealidad
+```{r}
+vif(regresion2)
+
+sqrt(vif(regresion2)) > 2
+```
+El segundo modelo presenta colinealidad en dos de las variables
+
+##Observaciones anómalas
+```{r}
+outlierTest(regresion2)
+
+```
+El modelo presenta 5 outliers
+
+
+```{r}
+hat.plot <- function(fit) {
+  p <- length(coefficients(fit))
+  n <- length(fitted(fit))
+  plot(hatvalues(fit), main="Index Plot of Hat Values")
+  abline(h=c(2,3)*p/n, col="red", lty=2)
+  identify(1:n, hatvalues(fit), names(hatvalues(fit)))
+}
+hat.plot(regresion2)
+```
+```{r}
+cutoff <- 4/(nrow(fondos)-length(regresion1$coefficients)-2)
+plot(regresion1, which=4, cook.levels=cutoff)
+abline(h=cutoff, lty=2, col="red")
+```
+```{r}
+influencePlot(regresion2, id.method="identify", main="Influence Plot", 
+              sub="Circle size is proportial to Cook's Distance" )
+```
+
+#SELECCION
+###AIC
+Elegimos el modelo que tenga menor AIC. El modelo 2 tiene menor coeficiente AIC
+```{r}
+AIC(regresion1,regresion2)
+```
+
+Elegimos el modelo que tenga menor BIC. El modelo 2 tiene menor coeficiente BIC
+```{r}
+BIC(regresion1,regresion2)
+```
+
+
+
+#CrossValidation
+###Modelo 1
+```{r}
+library(ISLR)
+set.seed(250)
+numData=nrow(fondos2)
+train=sample(numData ,numData/2)
+
+regres.train =lm(rent_1~1+rent_en_el_anio+Estilo_inversion_RV+rent_en_el_anio:rent_3_anios+Volatilidad_3+Morningstar_Rating,data=fondos2,subset=train)
+
+attach(fondos2)
+mean((rent_1-predict(regres.train ,Auto))[-train ]^2)
+```
+###Modelo2
+Este modelo proporciona menos error de predicción que el anterior
+```{r}
+set.seed(251)
+regres.train2 =lm(rent_1~1+rent_en_el_anio+Volatilidad_3+Media_3+rent_en_el_anio:rent_5_anios+rent_en_el_anio:rent_3_anios,data=fondos2,subset=train)
+mean((rent_1-predict(regres.train2 ,Auto))[-train ]^2)
+```
+
+Por tanto, si tuvieramos que elegir uno de los dos modelos escogeriamos el modelo 2 para predecir a pesar de que tenga colinealidad en 2 de sus variables.
+
+```
+
