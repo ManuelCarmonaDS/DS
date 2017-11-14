@@ -1,0 +1,576 @@
+---
+title: "Untitled"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#ENUNCIADO
+
+El archivo viajeros.csv muestra los datos de 50.000 viajeros de los que tenemos información diversa como su nacionalidad, su sexo, su edad, y, lo que más nos interesa, la valoración que ofrecen a un conjunto muy amplio de características, como su impresión general (en la columna del mismo nombre) o el alojamiento, entre otras (recogidas bajo el genérico valoración_xxx, donde xxx recoge el atributo concreto valorado).
+
+Debe emitir un informe detallando si existen grupos de turistas homogéneos a partir de la valoración que dan a los distintos servicios, tal y como se ha señalado. Deberá justificar que el análisis puede llevarse a cabo, el número de clusters a emplear, y la solución alcanzada. Se valorará, además de una correcta presentación, la identificación de posibles relaciones de los clusters alcanzados con una o varias características adicionales (pista: piense en la posible concentración de viajeros en los clusters en función de su nacionalidad, de su profesión, de su sexo, edad o renta, o de una combinación de las mismas).
+
+
+
+#Carga de datos y análisis exploratorio
+```{r}
+setwd("C:/Users/Manuel/Desktop/CUNEF/Técnicas Agrupacion y Reduccion/PRACTICA VIAJEROS")
+
+viajeros<-read.csv("C:/Users/Manuel/Desktop/CUNEF/Técnicas Agrupacion y Reduccion/PRACTICA VIAJEROS/viajeros.csv", header=T, sep=",")
+#View(viajeros)
+
+#ponemos la primera columna del data frame como nombre de las filas:
+viajeros<-data.frame(viajeros[,-1], row.names=viajeros[,1])
+
+#creamos una copia de seguridad del data frame original
+viajeros_orig=viajeros
+# Escalamos la variable impresion
+viajeros$IMPRESION <- viajeros$IMPRESION*2
+```
+
+
+Vemos las observaciones que tienen menos NA
+```{r}
+viajeros_cuantit=viajeros_orig[,c(3:31)]
+
+vacios<-c()
+nom<-c()
+for (i in (1:length(viajeros_cuantit))) {
+        a<- sum(is.na(viajeros_cuantit[,i]))
+        vacios<-c(vacios,a)
+        b<-colnames(viajeros_cuantit[i])
+        nom<- c(nom,b)
+}
+df_vacios<-data.frame(vacios,nom)
+df_vacios[df_vacios$vacios<30000&df_vacios$vacios>0,]
+```
+
+
+
+Vemos que algunas variables tienen una gran cantidad de NA. En este sentido, a fin de no perder demasiada informacion, transformaremos las variables Valoracion Golf y Valoracion Recreo NiNyos a variables dicotomicas. La razón es que constituyen características inherentes a grupos sociologicos concretos: asumimos que los viajeros que valoran el recreo de los niños es porque tienen hijos o similares (sobrinos), del mismo modo que asumimos que las personas que valoran el GOLF son jugadores de golf y, en general, entendemos que tienen cierto perfil de renta y ocupacion.
+```{r}
+summary(viajeros)
+```
+
+
+###valoracion golf
+Conseguimos una variable dicotómica que nos sitúa la observación dentro de un grupo concreto en la escala social (los golfistas suelen ser de clase media-alta ... etc)
+```{r}
+viajeros$VALORACION_GOLF <- replace(viajeros$VALORACION_GOLF, !is.na(viajeros$VALORACION_GOLF), "Si")
+viajeros$VALORACION_GOLF <- replace(viajeros$VALORACION_GOLF, is.na(viajeros$VALORACION_GOLF), "No")
+```
+
+
+###valoracion recreo ninyos
+conseguimos una variable dicotómica que nos dice de forma implícita si la observación forma parte de una unidad familiar o no
+```{r}
+viajeros$VALORACION_RECREO_NINYOS <- replace(viajeros$VALORACION_RECREO_NINYOS, !is.na(viajeros$VALORACION_RECREO_NINYOS), "Si")
+viajeros$VALORACION_RECREO_NINYOS <- replace(viajeros$VALORACION_RECREO_NINYOS, is.na(viajeros$VALORACION_RECREO_NINYOS), "No")
+```
+
+
+#División del análisis (meter lo del bucle)
+Vamos a analizar la base de datos con dos procedimientos paralelos:
+- en primer lugar, vamos a hacer un análisis clúster en función de los servicios generales que cualquier viajero puede puntuar. Alojamiento, clima, medio ambiente o gastronomía local son aspectos que cualquier turista puede puntuar.
+-Por otro lado, vamos a hacer un análisis clúster en función de los servicios específicos que no son atribuíbles a todos los viajeros. A diferencia de los anteriores servicios, la práctica de deportes en general, las excursiones o el ambiente nocturno son actividades que no todo el mundo practica y que, por tanto, han de tratarse de forma distinta. 
+
+Si observamos los NA de la muestra, coincide que los servicios generales tienen menos NA que las actividades específicas Con esta metodología conseguimos salvar mucha información para el grupo general que, de otra forma, se perdería al omitir los NA o se distorsionaría al sustituir los NA por vecinos cercanos o la media de la variable. 
+
+
+
+#ANALISIS DE SATISFACCION GENERAL
+```{r}
+viajeros_general<-viajeros[,c(1:16,19,23,28:35)]
+viajeros_general<-na.omit(viajeros_general)
+View(viajeros_general)
+```
+Nos queda una muestra de 11062 observaciones completas 
+
+¿Hay que tipificar? 
+Si las variables presentan fuertes variaciones de rango o una alta variabilidad, conviene tipificarlas. En este caso, las variables cuantitativas no presentan fuertes variaciones de rango ni una alta variabilidad. Ademas, la media está cerca de la mediana. No creo necesario tipificar. 
+
+
+Observo los estadísticos principales de viajeros_general (quito variables no numericas):
+```{r}
+general_stats <- data.frame(
+        Min = apply(viajeros_general[,c(3:16,19:22)], 2, min),                        
+        Med = apply(viajeros_general[,c(3:16,19:22)], 2, median),                       # mediana
+        Mean = apply(viajeros_general[,c(3:16,19:22)], 2, mean),                       # media
+        SD = apply(viajeros_general[,c(3:16,19:22)], 2, sd),                          #desv tipica
+        Max = apply(viajeros_general[,c(3:16,19:22)], 2, max)                            # Maximo
+)
+general_stats <- round(general_stats, 1)
+head(general_stats)
+```
+Como podemos observar, la distribución se concentra en torno al 8 en general (mediana), quedando un 50% a cada lado. La media es muy próxima a la mediana por lo que la influencia de los outliers no parece ser significativa. Esto de entrada nos da a entender que los viajeros están muy satisfechos o totalmente satisfechos con respecto a los servicios generales. 
+
+```{r}
+library(factoextra)
+library(cluster)
+library(gridExtra)
+library(ggplot2)
+```
+
+##ANALISIS PREVIO: ¿TIENE SENTIDO PROCEDER A UN CLUSTER?
+
+
+Aunque Emplearemos los packages factoextra para visualización, clustertend para evaluar la tendencia de agrupamiento y seriation para una evaluación visual de esa tendencia.
+
+Podemos hacer una primera inspección visual de un par de variables de sec.esc a través de un gráfico de densidad 2D de 'ggplot
+
+```{r}
+ggplot(as.data.frame(viajeros_general), aes(x=IMPRESION, y=VALORACION_HOSPITALIDAD)) +
+        geom_point() + # gráfico de dispersión
+        geom_density_2d() # Estimación bidimensional de la densidad
+```
+Como podemos ver, los valores se concentran en valoraciones altas em ambas variables, tal y como predecían los estadísticos
+
+
+Podemos hacer un gráfico para comprobar densidades y agrupamientos cruzando otras dos variables, por ejemplo, Valoración del alojamiento y valoración del trato en el alojamiento. 
+```{r}
+pruebaG=viajeros_general[,4:5]
+graf.datos = ggplot(pruebaG, aes(x = VALORACION_ALOJ, y = VALORACION_TRATO_ALOJ)) +
+geom_point() +
+stat_density2d(aes(color = ..level..))
+graf.datos
+```
+Como podemos observar, los agrupamientos tienen lugar en las valoraciones altas de ambos servicios. 
+
+
+
+Podemos comparar la situación anterior con una distribución uniforme aleatoria de los datos, empleando la
+función runif(n, min, max) como sigue
+```{r}
+# Generamos un conjunto aleatorio de datos para las dos variables
+set.seed(123)
+n = nrow(pruebaG)
+random_df = data.frame(
+x = as.integer(runif(nrow(pruebaG), min(pruebaG$VALORACION_ALOJ), max(pruebaG$VALORACION_ALOJ))),
+y = as.integer(runif(nrow(pruebaG), min(pruebaG$VALORACION_TRATO_ALOJ), max(pruebaG$VALORACION_TRATO_ALOJ))))
+# Colocamos en objeto para representación posterior
+graf.aleat=ggplot(random_df, aes(x, y)) + geom_point() + labs(x="ALOJAMIENTO",y="TRATO ALOJAMIENTO") + stat_density2d(aes(color = ..level..))
+graf.aleat
+```
+Como podemos observar en el gráfico, los perfiles son completamente distintos y, por tanto, nos sugiere la posibilidad de grupos frente a la distribución aleatoria de los datos.
+
+```{r}
+# Exige haber empaquetado los objetos, como hemos hecho; equivale a par(mfrow=c(f, c))
+grid.arrange(graf.datos, graf.aleat, nrow=1, ncol=2)
+```
+
+##ANALISIS CLUSTER 
+
+Utilizaremos un método no jeráquico puesto que nuestras variables no son variables continuas. 
+
+Emplearos el método CLARA (Clustering LArge Applications) para realizar el análisis, puesto que permite trabajar de forma cómoda con grandes conjuntos de varios miles de observaciones. 
+
+
+
+Tomamos una muestra de 1.000 observaciones,
+```{r}
+set.seed(555)
+muestra_general = viajeros_general[,c(4:16,19:22)][sample(1:nrow(viajeros_general[,c(4:16,19:22)]), 1000, replace=FALSE),]
+summary(muestra_general)
+```
+
+Aplicamos ahora la función NbClust()
+```{r}
+require(NbClust)
+Nb.viajeros_general=NbClust(muestra_general, distance = "euclidean", min.nc = 2,
+max.nc = 10, method = "complete", index ="all")
+```
+
+
+```{r}
+require(factoextra)
+fviz_nbclust(Nb.viajeros_general) + theme_minimal() +
+labs(x="Número k de clusters", y="Frecuencia")
+```
+
+
+Como vemos, la opción mayoritaria señala 4 grupos, que escogeremos.
+
+```{r}
+require(cluster)
+viajeros_general.clara=clara(viajeros_general[,c(4:16,19:22)], 3, samples=200)
+require(factoextra)
+fviz_cluster(viajeros_general.clara, stand = TRUE, geom = "point", pointsize = 1)
+```
+
+```{r}
+plot(silhouette(viajeros_general.clara), col = 2:4, main = "Gráfico de perfil")
+```
+
+Como podemos observar, existen malas asignaciones tanto en el cluster 1 como en el 3. El perfil medio del cluster es muy bajo y además las desviaciones del perfil de los cluster difieren bastante del medio, en especial el 1 y el 3. En este sentido, vamos a utilizar las variables con menos NA dentro de servicios generales asumiendo que de manera generalista las variables que mas gente ha contestado son las mas importantes dentro de la categoria general. 
+
+Volvemos a mirar las variables con menos NA como hicimos al principio
+```{r}
+viajeros_cuantit=viajeros_orig[,c(3:31)]
+
+vacios<-c()
+nom<-c()
+for (i in (1:length(viajeros_cuantit))) {
+        a<- sum(is.na(viajeros_cuantit[,i]))
+        vacios<-c(vacios,a)
+        b<-colnames(viajeros_cuantit[i])
+        nom<- c(nom,b)
+}
+df_vacios<-data.frame(vacios,nom)
+df_vacios[df_vacios$vacios<30000&df_vacios$vacios>0,]
+```
+
+
+Así:
+
+```{r}
+set.seed(555)
+muestra_general2 = viajeros_general[,c(3,4,10,11,12,13,15,16,20)][sample(1:nrow(viajeros_general[,c(3,4,10,11,12,13,15,16,20)]), 1000, replace=FALSE),]
+summary(muestra_general2)
+```
+
+
+```{r}
+require(NbClust)
+Nb.viajeros_general2=NbClust(muestra_general2, distance = "euclidean", min.nc = 2,
+max.nc = 10, method = "complete", index ="all")
+```
+
+
+
+```{r}
+require(factoextra)
+fviz_nbclust(Nb.viajeros_general2) + theme_minimal() +
+labs(x="Número k de clusters", y="Frecuencia")
+```
+
+En este caso, el conjunto de los métodos de decisión apuntan a que el número óptimo de custers es 2.
+
+
+
+```{r}
+require(cluster)
+viajeros_general.clara2=clara(viajeros_general[,c(3,4,10,11,12,13,15,16,20)], 2, samples=200)
+require(factoextra)
+fviz_cluster(viajeros_general.clara2, stand = TRUE, geom = "point", pointsize = 1)
+```
+El grupo 1 corresponde a los individuos que están bastante satisfechos y a los pocos que están relativamente satisfechos. El grupo 2 corresponde a los individuos que están muy satisfechos.
+
+```{r}
+plot(silhouette(viajeros_general.clara2), col = 2:3, main = "Gráfico de perfil")
+```
+
+Como podemos observar, aunque nos mejora mucho el perfil, sigue sin ser demasiado bueno y sigue habiendo malas asignaciones (en el cluster 1 en este caso). Parece que la hipótesis planteada era correcta, aunque no consiga un resultado óptimo. 
+
+Aun sin ser un resultado demasiado satisfactorio. Concluimos que tenemos 2 clusters principales dentro de viajeros según el nivel de satisfacción respecto de los servicios y actividades mas generales. 
+
+
+Matiz: es preciso destacar que durante el proceso hemos probado a eliminar outliers de distintas maneras, sin conseguir una mejora  palpable del clustering. 
+```{r}
+# require(data.table)
+# viajeros<-data.table(viajeros)
+# 
+# 
+# viajeros=viajeros[,ToKeep:= abs(EDAD-mean(EDAD)) < 3*sd(EDAD)][ToKeep == TRUE]
+# viajeros=viajeros[,ToKeep:= abs(VALORACION_HOSPITALIDAD-mean(VALORACION_HOSPITALIDAD)) < 3*sd(VALORACION_HOSPITALIDAD)][ToKeep == TRUE]
+# viajeros=viajeros[,ToKeep:= abs(VALORACION_CALIDAD_COMERCIO-mean(VALORACION_CALIDAD_COMERCIO)) < 3*sd(VALORACION_CALIDAD_COMERCIO)][ToKeep == TRUE]
+# viajeros=viajeros[,ToKeep:= abs(VALORACION_ESTADO_CARRETERAS-mean(VALORACION_ESTADO_CARRETERAS)) < 3*sd(VALORACION_ESTADO_CARRETERAS)][ToKeep == TRUE]
+# viajeros=viajeros[,ToKeep:= abs(VALORACION_SEGURIDAD-mean(VALORACION_SEGURIDAD)) < 3*sd(VALORACION_SEGURIDAD)][ToKeep == TRUE]
+# viajeros=viajeros[,ToKeep:= abs(VALORACION_SERVICIOS_TAXI-mean(VALORACION_SERVICIOS_TAXI)) < 3*sd(VALORACION_SERVICIOS_TAXI)][ToKeep == TRUE]
+# viajeros=viajeros[,ToKeep:= abs(VALORACION_SERVICIOS_BUS-mean(VALORACION_SERVICIOS_BUS)) < 3*sd(VALORACION_SERVICIOS_BUS)][ToKeep == TRUE]
+# viajeros=viajeros[,ToKeep:= abs(VALORACION_SALUD-mean(VALORACION_SALUD)) < 3*sd(VALORACION_SALUD)][ToKeep == TRUE]
+# viajeros=viajeros[,ToKeep:= abs(VALORACION_EXCURSIONES-mean(VALORACION_EXCURSIONES)) < 3*sd(VALORACION_EXCURSIONES)][ToKeep == TRUE]
+# viajeros=viajeros[,ToKeep:= abs(VALORACION_AMBIENTE_NOCTURNO-mean(VALORACION_AMBIENTE_NOCTURNO)) < 3*sd(VALORACION_AMBIENTE_NOCTURNO)][ToKeep == TRUE]
+# viajeros=viajeros[,ToKeep:= abs(VALORACION_ALQ_VEHIC-mean(VALORACION_ALQ_VEHIC)) < 3*sd(VALORACION_ALQ_VEHIC)][ToKeep == TRUE]
+# 
+# viajeros=viajeros[,ToKeep:= abs(IMPRESION)-mean(IMPRESION) < 3*sd(IMPRESION)][ToKeep == TRUE]
+# viajeros=viajeros[,ToKeep:= abs(VALORACION_ALOJ)-mean(VALORACION_ALOJ) < 3*sd(VALORACION_ALOJ)][ToKeep == TRUE]
+# viajeros=viajeros[,ToKeep:= abs(VALORACION_TRATO_ALOJ)-mean(VALORACION_TRATO_ALOJ) < 3*sd(VALORACION_TRATO_ALOJ)][ToKeep == TRUE]
+# viajeros=viajeros[,ToKeep:= abs(VALORACION_GASTRONO_ALOJ)-mean(VALORACION_GASTRONO_ALOJ) < 3*sd(VALORACION_GASTRONO_ALOJ)][ToKeep == TRUE]
+# viajeros=viajeros[,ToKeep:= abs(VALORACION_CLIMA)-mean(VALORACION_CLIMA) < 3*sd(VALORACION_CLIMA)][ToKeep == TRUE]
+# viajeros=viajeros[,ToKeep:= abs(VALORACION_ZONAS_BANYO)-mean(VALORACION_ZONAS_BANYO) < 3*sd(VALORACION_ZONAS_BANYO)][ToKeep == TRUE]
+# viajeros=viajeros[,ToKeep:= abs(VALORACION_PAISAJES)-mean(VALORACION_PAISAJES) < 3*sd(VALORACION_PAISAJES)][ToKeep == TRUE]
+# viajeros=viajeros[,ToKeep:= abs(VALORACION_TRANQUILIDAD)-mean(VALORACION_TRANQUILIDAD) < 3*sd(VALORACION_TRANQUILIDAD)][ToKeep == TRUE]
+# viajeros=viajeros[,ToKeep:= abs(VALORACION_MEDIO_AMBIENTE)-mean(VALORACION_MEDIO_AMBIENTE) < 3*sd(VALORACION_MEDIO_AMBIENTE)][ToKeep == TRUE]
+# viajeros=viajeros[,ToKeep:= abs(VALORACION_LIMPIEZA)-mean(VALORACION_LIMPIEZA) < 3*sd(VALORACION_LIMPIEZA)][ToKeep == TRUE]
+# viajeros=viajeros[,ToKeep:= abs(VALORACION_CALIDAD_RESTAUR)-mean(VALORACION_CALIDAD_RESTAUR) < 3*sd(VALORACION_CALIDAD_RESTAUR)][ToKeep == TRUE]
+# viajeros=viajeros[,ToKeep:= abs(VALORACION_OFERTA_GASTR_LOC)-mean(VALORACION_OFERTA_GASTR_LOC) < 3*sd(VALORACION_OFERTA_GASTR_LOC)][ToKeep == TRUE]
+# viajeros=viajeros[,ToKeep:= abs(VALORACION_TRATO_RESTAUR)-mean(VALORACION_TRATO_RESTAUR) < 3*sd(VALORACION_TRATO_RESTAUR)][ToKeep == TRUE]
+# viajeros=viajeros[,ToKeep:= abs(VALORACION_PRECIO_RESTAUR)-mean(VALORACION_PRECIO_RESTAUR) < 3*sd(VALORACION_PRECIO_RESTAUR)][ToKeep == TRUE]
+# viajeros=viajeros[,ToKeep:= abs(VALORACION_CULTURA)-mean(VALORACION_CULTURA) < 3*sd(VALORACION_CULTURA)][ToKeep == TRUE]
+# viajeros=viajeros[,ToKeep:= abs(VALORACION_DEPORTES)-mean(VALORACION_DEPORTES) < 3*sd(VALORACION_DEPORTES)][ToKeep == TRUE]
+# viajeros=viajeros[,ToKeep:= abs(VALORACION_PARQUES_OCIO)-mean(VALORACION_PARQUES_OCIO) < 3*sd(VALORACION_PARQUES_OCIO)][ToKeep == TRUE]
+```
+
+
+##COMPOSICION Y DESCRIPCION DE LOS CLUSTERS DE SATISFACCION GENERAL
+En este apartado vamos a describir cómo se componen los clusters que hemos formado, teniendo en cuenta las variables cualitativas de viajeros_general, con el objetivo de buscar relaciones entre la satisfacción y los valores de estas variables.  
+
+Lo primero es crear una columna que indique el cluster al que pertenece cada observación.
+```{r}
+CLUSTER<-viajeros_general.clara2$clustering #vector
+viajeros_general<-cbind(viajeros_general,CLUSTER)
+```
+
+Vemos la composicion en nº de cada cluster
+```{r}
+viajeros_general.clara2
+```
+Como vemos, los grupos son muy parecidos en tamaño. El cluster 1 tiene 5617 observaciones, mientras que el cluster 2 tiene 5445 observaciones. 
+
+
+Composicion por pais
+```{r}
+table(viajeros_general$PAIS_RESID_AGRUP, viajeros_general$CLUSTER)
+```
+Como podemos observar, el grupo de l tiene más presencia absoluta de alemanes, españoles y otras nacionalidades que el grupo 2, que tiene más presencia británica (31% del total del cluster) que el cluster 1. Se podría interpretar que, en cierto sentido, los británicos son más fáciles de satisfacer o menos exigentes. 
+El grupo mas exigente son los alemanes, con un 42% en el grupo de los más satisfechos.
+
+
+Composicion por ingresos
+```{r}
+table(viajeros_general$INGRESOS, viajeros_general$CLUSTER)
+```
+Como vemos, existe una composición bastante homogénea respecto a los ingresos. No parece una variable demasiado determinante. Si bien es cierto, los viajeros con mas ingresos tienen levemente a estar mas insatisfechos, pudiendo ser debido a sus altas expectativas.
+
+Relacion entre ingresos y golf
+```{r}
+table(viajeros_general$INGRESOS, viajeros_general$VALORACION_GOLF)
+```
+Sorprendentemente, descubrimos que las personas que menores ingresos tienen son las que más han puntuado el golf (por tanto, interpretamos que las que mas han jugado).
+
+Composición por alojamiento
+```{r}
+table(viajeros_general$ALOJ_CATEG_1, viajeros_general$CLUSTER)
+```
+En proporción, puede observarse como los alojamientos que mas satisfacción producen en terminos relativos son los hoteles de 5 estrellas y las viviendas propias o casas de amigos o familiares. Por el contrario, los menos satisfactorios son los hoteles y apartahoteles de hasta 3 estrellas, seguido de los extrahoteleros.
+
+Composición por sexo
+```{r}
+table(viajeros_general$SEXO, viajeros_general$CLUSTER)
+```
+Puede observarse que, el 46% de los hombres se sitúa en el grupo de individuos que reportan mas satisfacción, mientras que en este grupo se incluyen el 52% de las mujeres. Así,aunque las diferencias no son muy relevantes, se podría afirmar que en términos relativos los hombres son mas exigentes que las mujeres. 
+
+Composición por ocupación
+```{r}
+table(viajeros_general$OCUPACION, viajeros_general$CLUSTER)
+```
+En cuanto a la ocupación, los viajeros que trabajan de amas de casa son los mas satisfechos, mientras que los menos satisfechos son los parados y los estudiantes.
+
+Composición por familias
+```{r}
+table(viajeros_general$VALORACION_RECREO_NINYOS, viajeros_general$CLUSTER)
+```
+En el grupo 1 ha habido mas observaciones sobre las opciones de recreo de los niños. Entendemos por tanto, que en el grupo 1 hay mas unidades familiares con hijos. 
+
+
+```{r}
+table(viajeros_general$EDAD, viajeros_general$CLUSTER, viajeros_general$INGRESOS)
+```
+
+
+
+
+
+
+#ANALISIS DE SATISFACCION EN ACTIVIDADES ESPECIFICAS
+Matiz: En este análisis tenemos los viajeros que han participado en las actividades específicas. Una característica de las observaciones en este caso, es que TODOS los individuos han participado en TODAS las actividades/servicios específicos, dejando fuera a aquellos que solo han participado en algunos. 
+```{r}
+viajeros_esp<-viajeros[,c(1,2,17:28,32:35)]
+viajeros_esp<-na.omit(viajeros_esp)
+View(viajeros_esp)
+```
+Conseguimos una muestra de 5241 observaciones completas
+
+
+
+Observo los estadísticos principales de viajeros_esp (quito variables no numericas):
+```{r}
+esp_stats <- data.frame(
+        Min = apply(viajeros_esp[,c(3,4,6:8,10:14)], 2, min),                        
+        Med = apply(viajeros_esp[,c(3,4,6:8,10:14)], 2, median),                       # mediana
+        Mean = apply(viajeros_esp[,c(3,4,6:8,10:14)], 2, mean),                       # media
+        SD = apply(viajeros_esp[,c(3,4,6:8,10:14)], 2, sd),                          #desv tipica
+        Max = apply(viajeros_esp[,c(3,4,6:8,10:14)], 2, max)                            # Maximo
+)
+esp_stats <- round(esp_stats, 1)
+head(esp_stats)
+```
+Como podemos observar, la distribución se concentra en torno al 8 en general (mediana), quedando un 50% a cada lado. La media es muy próxima a la mediana por lo que la influencia de los outliers no parece ser significativa. Esto de entrada nos da a entender que los viajeros están muy satisfechos o totalmente satisfechos con respecto a los servicios específicos. En estos servicios, sin embargo, los outliers si son mas notables pues la media varía mas respecto de la mediana que en el caso de los servicios generales y la desviación típica es mayor.
+
+
+
+
+##ANALISIS PREVIO: ¿TIENE SENTIDO PROCEDER A UN CLUSTER?
+
+Volvemos a realizar el mismo proceso que con viajeros_general, pero con viajeros_esp
+
+```{r}
+ggplot(as.data.frame(viajeros_esp), aes(x=VALORACION_CULTURA, y=VALORACION_DEPORTES)) +
+        geom_point() + # gráfico de dispersión
+        geom_density_2d() # Estimación bidimensional de la densidad
+```
+Como se puede observar, en las actividades específicas haymas diferencias en cuanto a la satisfaccion, habiendo una mayor concentracion entre el aprobado y el sobresaliente. 
+
+
+Podemos hacer un gráfico para comprobar densidades y agrupamientos cruzando otras dos variables, por ejemplo, Valoración de parques de ocio y valoración de ambiente nocturno. 
+```{r}
+pruebaE=viajeros_esp[,6:7]
+graf.datos2 = ggplot(pruebaE, aes(x = VALORACION_PARQUES_OCIO, y = VALORACION_AMBIENTE_NOCTURNO)) +
+geom_point() +
+stat_density2d(aes(color = ..level..))
+graf.datos2
+```
+Como podemos observar, los agrupamientos tienne lugar entre el 5 y el 10, con una mayor concentración en torno al 8.
+
+
+Podemos comparar la situación anterior con una distribución uniforme aleatoria de los datos, empleando la
+función runif(n, min, max) como sigue
+
+```{r}
+# Generamos un conjunto aleatorio de datos para las dos variables
+set.seed(123)
+n = nrow(pruebaE)
+random_df2 = data.frame(
+x = as.integer(runif(nrow(pruebaE), min(pruebaE$VALORACION_PARQUES_OCIO), max(pruebaE$VALORACION_PARQUES_OCIO))),
+y = as.integer(runif(nrow(pruebaE), min(pruebaE$VALORACION_AMBIENTE_NOCTURNO), max(pruebaE$VALORACION_AMBIENTE_NOCTURNO))))
+# Colocamos en objeto para representación posterior
+graf.aleat2=ggplot(random_df2, aes(x, y)) + geom_point() + labs(x="PARQUES OCIO",y="AMBIENTE NOCTURNO") + stat_density2d(aes(color = ..level..))
+graf.aleat2
+```
+Como podemos observar en el gráfico, los perfiles son completamente distintos y, por tanto, nos sugiere la posibilidad de grupos frente a la distribución aleatoria de los datos.
+
+```{r}
+grid.arrange(graf.datos2, graf.aleat2, nrow=1, ncol=2)
+```
+
+
+##ANALISIS CLUSTER 
+
+Utilizaremos un método no jeráquico puesto que nuestras variables no son variables continuas. 
+
+Emplearos el método CLARA (Clustering LArge Applications) para realizar el análisis, puesto que permite trabajar de forma cómoda con grandes conjuntos de varios miles de observaciones. 
+
+
+
+Tomamos una muestra de 1.000 observaciones,
+```{r}
+set.seed(555)
+muestra_esp = viajeros_esp[,c(3,4,6:8,10:14)][sample(1:nrow(viajeros_esp[,c(3,4,6:8,10:14)]), 1000, replace=FALSE),]
+summary(muestra_esp)
+```
+
+
+
+Aplicamos ahora la función NbClust()
+```{r}
+require(NbClust)
+Nb.viajeros_esp=NbClust(muestra_esp, distance = "euclidean", min.nc = 2,
+max.nc = 10, method = "complete", index ="all")
+```
+
+
+```{r}
+require(factoextra)
+fviz_nbclust(Nb.viajeros_esp) + theme_minimal() +
+labs(x="Número k de clusters", y="Frecuencia")
+```
+Obtenemos que el número de clusters óptimo es 2 según 7 métodos, aunque el mismo número de métodos indican que 3 también es el número óptimo.
+
+Probamos con 3 clusters
+```{r}
+require(cluster)
+viajeros_esp.clara=clara(viajeros_esp[,c(3,4,6:8,10:14)], 3, samples=200)
+require(factoextra)
+fviz_cluster(viajeros_esp.clara, stand = TRUE, geom = "point", pointsize = 1)
+```
+
+
+
+```{r}
+plot(silhouette(viajeros_esp.clara), col = 2:4, main = "Gráfico de perfil")
+```
+Existen malas asignaciones en el cluster 1 y el 2. El mejor cluster es el 3, con un perfil de 0.49.
+
+
+
+```{r}
+require(cluster)
+viajeros_esp.clara2=clara(viajeros_esp[,c(3,4,6:8,10:14)], 2, samples=200)
+require(factoextra)
+fviz_cluster(viajeros_esp.clara, stand = TRUE, geom = "point", pointsize = 1)
+```
+ Desde esta perspectiva no se aprecia demasiado solapamiento. 
+ 
+```{r}
+plot(silhouette(viajeros_esp.clara2), col = 2:3, main = "Gráfico de perfil")
+```
+Como podemos observar, existen malas asignaciones en el cluster 1, que tiene un perfil muy bajo. Sin embargo, el perfil medio ha mejorado respecto al anterior, pasando de 0.23 a 0.26.
+Vamos a quedarnos con la división en 2 clusters ya que la desviación del perfil de los clusters respecto del perfil medio es parecida y el perfil medio es mejor.
+
+
+
+##COMPOSICION Y DESCRIPCION DE LOS CLUSTERS DE SATISFACCION ESPECIFICA
+En este apartado vamos a describir cómo se componen los clusters que hemos formado, teniendo en cuenta las variables cualitativas de viajeros_general, con el objetivo de buscar relaciones entre la satisfacción y los valores de estas variables.  
+
+Lo primero es crear una columna que indique el cluster al que pertenece cada observación.
+```{r}
+CLUSTER<-viajeros_esp.clara2$clustering #vector
+viajeros_esp<-cbind(viajeros_esp,CLUSTER)
+```
+
+Vemos la composicion en nº de cada cluster
+```{r}
+viajeros_esp.clara2
+```
+Como vemos, los grupos son muy parecidos en tamaño. El cluster 1 tiene 2864 observaciones, mientras que el cluster 2 tiene 2377 observaciones. 
+
+
+Composicion por pais
+```{r}
+table(viajeros_esp$PAIS_RESID_AGRUP, viajeros_esp$CLUSTER)
+```
+En este caso cambian las tornas, los mas satisfechos por lo general son los británicos, mientras que los españoles son los menos satisfechos.  
+
+
+Composicion por ingresos
+```{r}
+table(viajeros_esp$INGRESOS, viajeros_esp$CLUSTER)
+```
+Como vemos, existe una composición menos homogénea respecto a los ingresos. Los viajeros con mas ingresos tienden a estar menos satisfechos en términos relativos.
+
+
+Composición por alojamiento
+```{r}
+table(viajeros_esp$ALOJ_CATEG_1, viajeros_esp$CLUSTER)
+```
+Se vuelve a repetir el patrón. En proporción, puede observarse como los alojamientos que mas satisfacción producen en terminos relativos son los hoteles de 5 estrellas y las viviendas propias o casas de amigos o familiares. Por el contrario, los menos satisfactorios son ahora los extrahoteleros seguidos de los hoteles y apartahoteles de hasta 3 estrellas.
+
+Composición por sexo
+```{r}
+table(viajeros_esp$SEXO, viajeros_esp$CLUSTER)
+```
+Como vemos, teniendo en cuenta los servicios específicos existe un porcentaje menor de individuos en el grupo de los mas satisfechos. Se incluyen en este grupo el 42% de los hombres y el 49% de las mujeres. Esto podría llevarnos a pensar que los servicios mas específicos están mas descuidados.
+
+Composición por ocupación
+```{r}
+table(viajeros_esp$OCUPACION, viajeros_esp$CLUSTER)
+```
+En cuanto a la ocupación, los jubilados o retirados son los menos satisfechos con las actividades y servicios específicos, mientras que los mas satisfechos vuelven a ser las amas de casa. 
+
+
+Composición por familias
+```{r}
+table(viajeros_esp$VALORACION_RECREO_NINYOS, viajeros_esp$CLUSTER)
+```
+Podemos observar una clarísima diferencia con la composición de los clusters de servicios y actividades generales. La mayoría de los individuos que ha participado en actividades o servicios específicos también forma parte de una unidad familiar o tiene hijos, ya que asumimos que los individuos que evaluan una actividad o servicio es porque han accedido a el y, por tanto, los que evaluan recreo de los niños tienen hijos o similares(sobrinos, por ejemplo).
+
+```{r}
+table(viajeros_esp$VALORACION_RECREO_NINYOS, viajeros_esp$CLUSTER, viajeros_esp$INGRESOS)
+```
+
+
