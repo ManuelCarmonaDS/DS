@@ -1,0 +1,540 @@
+---
+title: "Practica2 - credit risk and loan performance"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+El objetivo de esta practica es establecer un modelo que permita predecir si un prestamo hara default o no a partir de los datos de Lending Club (2007-2011). Tenemos que depurar los datos y trabajar con ellos para estimar un modelo que permita responder a preguntas como las siguientes:
+
+Cuales son las caracteristicas de los prestatarios que permiten determinar el riesgo de impago?
+A partir de que punto se debe denegar un crédito al cliente?
+
+....
+```{r}
+#rm(list=ls())
+```
+
+
+#Carga de datos
+
+El primer paso es importar los datos desde el fichero. Después, tras un estudio exhaustivo de las variables a partir del archivo LCDataDictionary, filtraremos las variables en función de la información que contengan. Eliminaremos aquellas que tengan la informacion muy incompleta. Posteriormente eliminaremos las variables que, desde un punto de vista de negocio, no consideremos relevantes o que solapen la información de otra variable. 
+```{r}
+setwd("C:/Users/Manuel/Desktop/CUNEF/Prediccion/Practica2")
+loandata<-read.csv("C:/Users/Manuel/Desktop/CUNEF/Prediccion/Practica2/LoanStats3aSEP.csv", sep="|", dec=".", fill=T, header=T)
+#View(loandata)
+
+```
+
+Primer Filtro
+```{r}
+loandata<-loandata[,c(2:47)]
+loandata_orig<-loandata
+```
+
+Segundo Filtro
+```{r}
+loandata<-loandata[,c(-18,-28,-29)]
+```
+
+
+Vamos a dejar las variables que podrian interesarnos para explicar loan_status (ademas de loan_status): el tipo de interés, el pago mensual (installment), el grado de calidad crediticia del credito, el subgrado de calidad, renta anual, detb-to-income ratio, los incididentes de morosidad en los ultimos 2 años,los incididentes de morosidad en los ultimos 6 meses, el numero de lineas de credito abiertas por el prestatario, balance de credito, credito utilizado respecto al total disponible, el numero total de lineas de credito actualmente asignadas al perfil de credito del prestatario y el pago total recibido hasta la fecha por el total financiado.
+```{r}
+loandata2<-loandata[,c(6:9,13,16,23,24,26,27,29,30,31,35)]
+#loandata2<-na.omit(loandata2)
+str(loandata2)
+```
+
+
+
+
+##Proceso de limpieza de la variable a explicar: loan_status
+Dado que tenemos valores erróneos en algunas observaciones, vamos a limpiar el dataset para poder trabajar de forma oportuna.
+```{r}
+
+posiciones_vacio <- NULL
+for (i in (1:length(loandata2$loan_status))){
+        if (loandata2$loan_status[i]==""){
+                posiciones_vacio <- c(posiciones_vacio,i)
+        }
+        
+}
+
+length(posiciones_vacio)
+loandata2<-loandata2[-posiciones_vacio,]
+
+```
+
+Utilizamos la funcion revalue para cambiar los valores erroneos por NA y eliminarlos facilmente
+```{r}
+library(plyr)
+loandata2$loan_status<-revalue(loandata2$loan_status, c("Does not meet the credit policy. Status:Fully Paid"="Fully Paid", "Does not meet the credit policy. Status:Charged Off"="Charged Off", "Aug-2010"="NA", "Jul-2010"="NA", "Mar-2011"="NA", "May-2011"="NA", "Nov-2011"="NA", "Oct-2010"="NA", "Sep-2011"="NA", "Dec-2010"="NA", "Dec-2011"="NA", "f"="NA", "Feb-2011"="NA"))
+
+```
+
+```{r}
+loandata2$loan_status<-revalue(loandata2$loan_status,c("Feb-2011"="Fully Paid", "NA"="Fully Paid"))
+```
+
+Comprobamos que todo es correcto
+```{r}
+summary(loandata2$loan_status)
+```
+
+
+
+##Limpiamos el resto de variables importantes
+###dti
+```{r}
+posiciones_vacio <- NULL
+posiciones_f <- NULL
+
+for (i in (1:length(loandata2$dti))){
+        if (loandata2$dti[i]==""){
+                posiciones_vacio <- c(posiciones_vacio,i)
+        }
+        
+}
+
+head(posiciones_vacio)
+
+loandata2<-loandata2[-posiciones_vacio,]
+
+
+
+```
+
+
+
+###delinq_2yrs
+The number of 30+ days past-due incidences of delinquency in the borrower's credit file for the past 2 years
+```{r}
+posiciones_vacio <- NULL
+posiciones_f <- NULL
+
+for (i in (1:length(loandata2$delinq_2yrs))){
+        if (loandata2$delinq_2yrs[i]==""){
+                posiciones_vacio <- c(posiciones_vacio,i)
+        }
+        
+}
+
+head(posiciones_vacio)
+
+loandata2<-loandata2[-posiciones_vacio,]
+```
+
+
+###revol_bal
+Total credit revolving balance - Revolving credit is a type of credit that can be used repeatedly up to a certain limit as long as the account is open and payments are made on time.
+```{r}
+posiciones_vacio <- NULL
+posiciones_f <- NULL
+
+for (i in (1:length(loandata2$revol_bal))){
+        if (loandata2$revol_bal[i]==""){
+                posiciones_vacio <- c(posiciones_vacio,i)
+        }
+        
+}
+
+head(posiciones_vacio)
+
+loandata2<-loandata2[-posiciones_vacio,]
+```
+
+
+###revol_util
+Revolving line utilization rate, or the amount of credit the borrower is using relative to all available revolving credit.
+```{r}
+posiciones_vacio <- NULL
+posiciones_f <- NULL
+
+for (i in (1:length(loandata2$revol_util))){
+        if (loandata2$revol_util[i]==""){
+                posiciones_vacio <- c(posiciones_vacio,i)
+        }
+        
+}
+
+head(posiciones_vacio)
+
+loandata2<-loandata2[-posiciones_vacio,]
+```
+
+
+
+De que tipo son mis datos?
+```{r}
+str(loandata2)
+```
+
+
+Transformamos las variables de tipo factor a numerico, si procede.
+```{r}
+typeof(loandata2$int_rate)
+loandata2$int_rate = gsub("%", "",loandata2$int_rate)
+head(loandata2$int_rate)
+
+
+loandata2$revol_util= gsub("%", "",loandata2$revol_util)
+head(loandata2$revol_util)
+
+loandata2$dti<-as.numeric(paste(loandata2$dti))
+loandata2$int_rate<-as.numeric(paste(loandata2$int_rate))
+loandata2$revol_util<-as.numeric(paste(loandata2$revol_util))
+loandata2$annual_inc<-as.numeric(paste(loandata2$annual_inc))
+loandata2$total_acc<-as.numeric(paste(loandata2$total_acc))
+loandata2$installment<-as.numeric(paste(loandata2$installment))
+loandata2$delinq_2yrs<-as.numeric(paste(loandata2$delinq_2yrs))
+loandata2$inq_last_6mths<-as.numeric(paste(loandata2$inq_last_6mths))
+loandata2$open_acc<-as.numeric(paste(loandata2$open_acc))
+loandata2$revol_bal<-as.numeric(paste(loandata2$revol_bal))
+loandata2$total_pymnt<-as.numeric(paste(loandata2$total_pymnt))
+
+# IMPORTANTE: SI UTILIZAMOS SOLO -as.numeric- sin -paste-, sustituye LOS VALORES POR VALORES ALEATORIOS  DE
+#TIPO NUMERICO.
+```
+
+Los variables interest rate y revol_util al estar expresadas en porcentaje y haberlas convertido a tipo numerico las tenemos que dividir entre 100.
+```{r}
+loandata2$int_rate <- (loandata2$int_rate/100)
+loandata2$revol_util <- (loandata2$revol_util/100)
+```
+
+
+```{r}
+unique(loandata2$sub_grade)
+unique(loandata2$grade)
+
+```
+
+Vemos un summary de los datos que tenemos:
+```{r}
+loandata2 <- loandata2[,-4]
+summary(loandata2)
+```
+
+Quitamos los NAs
+```{r}
+loandata2 <- na.omit(loandata2)
+```
+
+
+Miramos la relacion entre Grade y Default
+```{r}
+library(ggplot2)
+ggplot(loandata2, aes(grade)) + geom_bar(aes(fill=loan_status))
+
+```
+
+Podemos podemos observar como aumenta el % de prestamos que entran en default a medida que disminuye el rating.
+
+
+
+#Regresion
+
+##Estimacion
+Creamos un nuevo Dataframe con todas las variables menos la variable a predecir Loan Status
+```{r}
+library(modelr)
+library(dplyr)
+library(purrr)
+library(leaps)
+```
+
+Vamos a emplear la metolodogia mas automatica que hay disponible hasta la fecha. Seleccionaremos el modelo con step. El modelo que obtengo es el resultado de sucesivas comparaciones con base en el Cp de Mallow.
+```{r}
+step(glm(loan_status~., family = "binomial", data=loandata2),direction='backward')
+```
+
+##Crossvalidation
+Una vez tenemos un primero modelo, vamos a hacer crossvalidation con kfolds. Utilizaremos el 90% de la muestra para train y el 10% para test. Ningun train sample es igual y, por tanto, ningun test es igual. De esta manera, consigo 10 modelos distintos para poder elegir cual es el mejor en el training y en el testing.
+```{r}
+#Crossvalidation
+set.seed(20171025)  
+folds <- crossv_kfold(loandata2, k = 10)
+folds
+```
+
+
+```{r}
+folds$test[[1]]
+```
+
+
+```{r}
+folds$train[[1]]
+```
+
+
+Ejecuto el proceso para cada submuestra (step)
+```{r}
+folds <- folds %>%
+  mutate(model = map(train, ~ step(glm(loan_status~., family = "binomial", data=.),direction='backward'))) %>%
+  mutate(aic=map_dbl(model,AIC)) %>%
+  mutate(deviance = map2_dbl(model, test, deviance))
+  
+```
+
+```{r}
+folds %>%
+  select(.id, aic, deviance)
+```
+
+
+```{r}
+folds$aic
+```
+
+Como podemos comprobar el modelo que presenta una menor AIC es el 1 que por tanto es el que vamos a seleccionar.
+
+```{r}
+folds$model[1]
+```
+
+Guardamos en un Dataframe la muestra que se ha utilizado para el entrenamiento en el modelo 1.
+```{r}
+df_train <- data.frame(folds$train[1])
+
+head(df_train)
+```
+
+
+Cambiamos el nombre de las columnas quitando X1.
+```{r}
+names <- colnames(df_train)
+names <- gsub('X1.','',names, fixed=TRUE)
+colnames(df_train) <- names
+```
+
+
+Guardamos en un Dataframe la muestra que se ha utilizado para el test en el modelo 1
+```{r}
+df_test <- data.frame(folds$test[1])
+
+head(df_test)
+```
+
+Cambiamos el nombre de las columnas quitando X1.
+```{r}
+names <- colnames(df_test)
+names <- gsub('X1.','',names, fixed=TRUE)
+colnames(df_test) <- names
+```
+
+
+Guardamos el modelo definitivo como "modelodef"
+```{r}
+modelodef <- glm(formula = loan_status ~ int_rate + installment + grade + 
+    annual_inc + dti + delinq_2yrs + open_acc + revol_bal + revol_util + 
+    total_acc + total_pymnt, family = "binomial", data = df_train)
+summary(modelodef)
+```
+
+
+
+##Predicción dentro y fuera de la muestra
+
+###Dentro de la muestra(Training)
+
+```{r}
+hist(predict(modelodef,type="response"))
+
+```
+
+```{r}
+table(predict(modelodef,type="response")>0.20)
+```
+
+Con un punto de corte de 0,20 en la muestra de entrenamiento habría 31.798 individuos con una probabilidad de Default inferior al 20% y 6.278 con probabilidad superior.
+
+```{r}
+prob.modelodf.insample <- predict(modelodef,type="response")
+predicted_modelodf_insample <- predict(modelodef,type="response")>0.20
+predicted_modelodf_insample <- as.numeric(predicted_modelodf_insample)
+```
+
+
+####Creamos la matriz de confusion
+
+```{r}
+matriz_confusion_train <- table(df_train$loan_status,predicted_modelodf_insample,dnn=c("Truth","Predicted"))
+matriz_confusion_train <- as.data.frame(matriz_confusion_train)
+filas <- c(1,4)
+matriz_confusion_train <- matriz_confusion_train[-filas,]
+matriz_confusion_train
+```
+
+Tasa de error
+```{r}
+Verdadero_positivo <- matriz_confusion_train$Freq[1]
+Falso_positivo <- matriz_confusion_train$Freq[2]
+Falso_negativo <- matriz_confusion_train$Freq[3]
+Verdadero_negativo <- matriz_confusion_train$Freq[4]
+Total <- sum(matriz_confusion_train$Freq)
+
+Tasa_de_error <- (Falso_positivo+Falso_negativo)/Total
+Tasa_de_error
+```
+
+Aciertos positivos y aciertos negativos
+
+```{r}
+aciertos_positivos <- Verdadero_positivo/(Verdadero_positivo + Falso_negativo)
+aciertos_positivos
+aciertos_negativos <- Verdadero_negativo/(Verdadero_negativo+Falso_positivo)
+aciertos_negativos
+```
+
+Como podemos en la muestra de entrenamiento el modelo tiene una tasa de éxito muy alta con respecto a clasificar como Fully Paid a un individuo pero presenta una mayor tasa de error a la hora de clasificar como charged Off (Default).
+
+Por tanto nuestro modelo no es muy efectivo a la hora de predecir los casos de Default. Lo que nos sugiere que se debe ser prudente a la hora de utilizar el mismo, seleccionando un criterio de corte prudente (cortaremos con probabilidades bajas).
+
+
+
+###Fuera de la muestra(Test)
+
+
+```{r}
+hist(predict(modelodef,df_test,type="response"))
+
+```
+
+```{r}
+table(predict(modelodef,df_test,type="response")>0.20)
+```
+
+Con un punto de corte de 0,20 en el TEST habría 3.554 individuos con una probabilidad de Default inferior al 20% y 677 con probabilidad superior.
+
+```{r}
+prob.modelodf.outsample <- predict(modelodef,df_test,type="response") 
+predicted_modelodf_outsample <- predict(modelodef,df_test,type="response")>0.20
+predicted_modelodf_outsample <- as.numeric(predicted_modelodf_outsample)
+```
+
+
+####Creamos la matriz de confusion
+
+```{r}
+matriz_confusion_test <- table(df_test$loan_status,predicted_modelodf_outsample,dnn=c("Truth","Predicted"))
+matriz_confusion_test <- as.data.frame(matriz_confusion_test)
+filas <- c(1,4)
+matriz_confusion_test <- matriz_confusion_test[-filas,]
+matriz_confusion_test
+```
+
+Tasa de error
+```{r}
+Verdadero_positivo <- matriz_confusion_test$Freq[1]
+Falso_positivo <- matriz_confusion_test$Freq[2]
+Falso_negativo <- matriz_confusion_test$Freq[3]
+Verdadero_negativo <- matriz_confusion_test$Freq[4]
+Total <- sum(matriz_confusion_test$Freq)
+
+Tasa_de_error <- (Falso_positivo+Falso_negativo)/Total
+Tasa_de_error
+```
+
+
+Aciertos positivos y aciertos negativos
+```{r}
+aciertos_positivos <- Verdadero_positivo/(Verdadero_positivo + Falso_negativo)
+aciertos_positivos
+aciertos_negativos <- Verdadero_negativo/(Verdadero_negativo+Falso_positivo)
+aciertos_negativos
+```
+
+Como podemos en la muestra de entrenamiento el modelo tiene una tasa de éxito muy alta con respecto a clasificar como Fully Paid a un individuo pero presenta una mayor tasa de error a la hora de clasificar como charged Off (Default).
+
+Por tanto nuestro modelo no es muy efectivo a la hora de predecir los casos de Default. Lo que nos sugiere que se debe ser prudente a la hora de utilizar el mismo, seleccionando un criterio de corte prudente (cortaremos con probabilidades bajas).
+
+
+##Curva ROC
+Representación de la curva ROC para fuera del training (TEST)
+```{r}
+library(verification)
+roc.plot(df_test$loan_status == "Charged Off", prob.modelodf.outsample)
+```
+La curva de Roc nos sugiere que para a partir de un false alarm Rate de un 10% (proporcion de Falso negativo entre el total de valores negativos reales) con un respectivo Hit rate de un 80% (proporcion de verdaderos positivos sobre el total de valores positivos reales) crece de forma lenta. 
+
+Por tanto a priori siendo conservadores a partir de un 20% de probabilidad deberíamos considerar como Charged Off o Default al individuo.
+
+
+```{r}
+roc.plot(df_test$loan_status == "Charged Off", prob.modelodf.outsample)$roc.vol
+```
+
+
+El área de nuestro modelo es un 0,90 al ser un número cercano a 1 nos indica de la bondad de nuestro modelo.
+
+
+##Función de costes:
+
+Definir el search grid desde 0.01 a 0.99
+```{r}
+searchgrid = seq(0.01, 0.99, 0.01)
+```
+
+
+El resultado es una matriz de 99 filas y 2 columnas, la primera columna contiene la cut-off p y la segunda el coste 
+
+```{r}
+result = cbind(searchgrid, NA)
+```
+
+
+
+```{r}
+cost1 <- function(r, pi){
+        weight1 = 10
+        weight0 = 1
+        c1 = (r=="Charged Off")&(pi<pcut) #logical vector - true if actual 1 but predict 0
+        c0 = (r=="Fully paid")&(pi>pcut) #logical vector - true if actual 0 but predict 1
+        return(mean(weight1*c1+weight0*c0))
+}
+```
+
+in the cost function, both r and pi are vectors, r=truth, pi=predicted probability
+
+```{r}
+for(i in 1:length(searchgrid)) {
+        pcut <- result[i,1]
+        result[i,2] <- cost1(df_train$loan_status, prob.modelodf.insample) 
+        }
+```
+
+```{r}
+head(result)
+```
+
+```{r}
+plot(result, ylab="Cost in Training Set")
+```
+
+#Conclusiones
+
+Como se puede observar la función de costes sigue un comportamiento prácticamente lineal, es decir para mejorar el ratio de acierto se debe incurrir en un mayor coste en todo momento.
+
+Por ello nos resulta complicado tomar decisiones de corte en base a este criterio. Tendremos en cuenta la curva de Roc como criterio para seleccionar nuestro cut off o punto a partir del cual asignamos a un inviduo como Default. 
+
+Tras el análisis del comportamiento de nuestra curva hemos decidio seleccionar el 20% como cutoff probability ya que en ese punto tenemos un alto porcentaje de acierto (80%) con un bajo porcentajr de falsa alarma (cercano al 10%). Adicionalmente nuestro ratio de acierto a la hora de clasificar un individuo como Default es de un 78% frente al 95% de clasificarlo correctamente como no Default. Por tanto también nos invita a ser prudentes a la hora de elegir la probabilidad de corte.
+
+Finalmente para aumentar nuestro porcentaje de acierto tendríamos que reducir aún mas si cabe nuestra cutoff probabibility lo que implicaría tener un porcentaje de falsa alarma mucho mas alto, lo que supondría dejar de conceder préstamos a muchos individuos y por tanto reducir mucho el volumen de negocio negocio. 
+
+
+
+
+
+
+
+
+
+
+

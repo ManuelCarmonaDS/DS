@@ -1,0 +1,258 @@
+---
+Author: "Manuel Carmona"
+title: "Ejercicios de explicación Perceptron"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Perceptron Learning Rule
+
+x<- matriz de variables explicativas
+y <- vector de variable a explicar
+w <- nÃºmero de parÃ¡metros, tantos como variables explicativas haya.
+R <- criterio de penalizaciÃ³n, se obtiene como el mÃ¡ximo de las posibles normas eucladianas de cada fila de la matriz x.
+La normas eucladiana: (sqrt(p*p)) del vector depende la longitud de dicha vector. 
+
+En la funciÃ³n DistanceFromPlane Z es el X de la funciÃ³n Classify Linear.
+
+Se llama distancia from plane pero realmente es el valor de la funciÃ³n al multiplicar el valor de los parÃ¡metros por la x. Si el valor de la funciÃ³n es inferior a cero (le asignamos el valor -1) y si es valor superior a cero (le asignamos el valor 1).
+
+El bucle compara y(i): valor real frente al valor estimado yc(i)
+
+si en algun valor difiere, cambio el valor de los parÃ¡metros.
+Como se cambia el valor de los parÃ¡metros (metiendole una proporcion que depende de la tasa de crecimiento), si el valor estimado (yc[i]) es -1 el valor de y[i], el parÃ¡metro te resta en la proporciÃ³n del valor de cada elemento en la ecuaciÃ³n.
+
+
+```{r}
+# w, x, y are vectors
+
+w = 0
+
+# b parameter must also be included for the peceptron algorithm to deliver a valid separator.
+# for incorrectly classified training samples b must be adjusted, too:
+
+# while any training observation (x, y) is not classified correcty {
+#   set w = w + learning_rate * yx
+#   set b = b + learning_rate * yR^2
+  # where R is some constant larger than the distance from the
+  # origin to the furtherest training sample
+# }
+```
+
+Funcionn de Perceptron:
+
+Para definir esta funcionn hay que definir previamente tres funciones:
+
+- DistanceFromPlane: te calcula el valor de la funcionn, en un primer momento con el valor de los parametros inicializado
+- EuclideanNorm: te calcula norma euclidea del vector de x. Es la raiz cuadrada de la suma de los Xi elevados al cuadrado.
+- ClassifyLinear: Esta funcionn realiza la prediccion, clasifica a un individuo en 1 o -1 en funcionn del valor de la funcion.
+
+En el descenso del gradiente el criterio para modificar el valor de los parametros, es el gradiente o la derivada de la funcionn segonn el parametro.
+
+
+Por motivmos meramente académicos, vamos a considerar que CADA CAMBIO por pequeño que sea se considerara error. En este sentido el vector de errores lo situamos al final de la función, dentro del for y dentro del if. Esto en la práctica no es útil ya que el objetivo es representar como el error cae conforme aumentan las operaciones y, para tal propósito, un nivel de detalle tan alto no aporta valor pero si un incremento del coste computacional tremendo. 
+```{r}
+DistanceFromPlane = function(z, w, b) {
+        sum(z * w) + b
+}
+ClassifyLinear = function(x, w, b) {
+        distances = apply(x, 1, DistanceFromPlane, w, b)
+        return(ifelse(distances < 0, -1, +1))
+}
+
+EuclideanNorm <- function(x) {
+        return(sqrt(sum(x * x)))
+}
+
+PerceptronFunction <- function(x, y, learning.rate) {
+        vector_iteraciones <- NULL
+        contador <- 0
+        vector_errores <- NULL
+        w = vector(length = ncol(x)) # initialize w
+        b = 0 # Initialize b
+        iterations = 0 # count iterations
+        R = max(apply(x, 1, EuclideanNorm))
+        convergence = FALSE # to enter the while loop
+        while (!convergence & iterations < 500) { #metemos criterio de parada para que no exista un bucle infinito. 
+                convergence = TRUE # hopes luck
+                yc <- ClassifyLinear(x, w, b) #clasifica cada elemento de X.
+                for (i in 1:nrow(x)) {
+                        if (y[i] != yc[i]) {
+                                convergence <- FALSE
+                                w <- w + learning.rate * y[i] * x[i,] #se trata de multiplicar el verdadero valor del parametro por la fila con todos los valores de la fila x correspondiente que es un vector. Se suma al vector de coeficientes y los modifica en ese sentido
+                                b <- b + learning.rate * y[i] * R^2
+                                iterations <- iterations + 1
+                                vector_iteraciones <- c(vector_iteraciones,iterations)
+                                y_pred <- ClassifyLinear(x, w, b)
+                                vector_errores <- c(vector_errores,sum(abs(y - y_pred)))
+                        }
+                }
+        }
+        s = EuclideanNorm(w) #se hace la norma euclidea del vector de los parametros para normalizar el valor de los mismos. 
+        
+        df <- data.frame(vector_iteraciones,vector_errores)
+        
+        return(list(w = w/s, b = b/s, steps = iterations, datos = df))
+}
+
+
+#EN EL CASO DE QUE QUISIERAMOS CALCULAR EL ERROR DE FORMA PRACTICA, calculariamos el error dentro del while pero fuera del for tal que:
+
+ # R = max(apply(x, 1, EuclideanNorm))
+ # 
+ #  convergence <- FALSE # to enter the while loop
+ # 
+ #  while (!convergence) {
+ # 
+ #    convergence <- TRUE # hopes luck
+ # 
+ #    yc <- ClassifyLinear(x, w, b)
+ # 
+ #    # update cycles
+ # 
+ #    cycles <- cycles + 1
+ # 
+ #    # update error for this cycle
+ # 
+ #    errorEvolutions <- rbind(errorEvolutions, c(cycles, sum(abs(y - yc))))
+ # 
+ #    for (i in 1:nrow(x)) {
+
+
+#nosotros trabajremos con el primer enfoque aprovechando que estamos usando pocos datos para ver como funcionaría
+```
+Es como si nos formase un plano con w y b y calculase la distancia al plano de cada x. 
+
+Si la distancia es menor que 0 devuelveme -1(estas por debajo) y si es al reves +1(estas por arriba). Asi para cada x me dice si esta por debajo o por arriba. Yc devuelve tantos -1 y +1 como x tengamos. 
+yc va elemento a elemento comprobando si devuelve lo que tiene que devolver hasya que haya convergencia. Si la convergencia no se da, es decir, si me equivoco, ajusto los parámetros y la b,. La w (coeficientes) por lo que debería haber devuelto en donde ha fallado multiplicado por el valor de la x en ese punto. En la b ajusta por el punto donde ha fallado multiplicado por el modulo mas actual. 
+
+La norma euclídea del vector (4,5) es la raíz de (4^2+5^2). Está asociada al modulo del vector.
+
+PerceptrónFunction (x=train, y=label..): al principio prepara la estrcutura de datos. Iterations es un contador. Se calcula norma euclídea de cada valor en x y se queda con el que tenga el valor mas alto. 
+Ponemos convergencia = FALSE y le ordenamos que mientras no encuentre la convergencia, que me encuentre un clasificador lineal tenienedo en cuenta que x= el conjunto entrenamiento, w=los coef definidos al inicio, y b el termino independiente fijado desde el principio. 
+
+
+Mientras que no haya convergencia  va elemento a elemento a ver si lo real y lo que predice es igual, si no es igual entonces ajusta los parametros w y b. ajusta:
+w: w+learning rate multiplicado por la proporcion/peso que tiene la variable en la ecuacion (suma del valor de las x de la fila que corresponda del dataframe multiplicado por y(i).
+b: b+learning rate multiplicado por el R^2 ultimo multiplicado por y(i)
+
+```{r}
+# very easy
+# x2 = x1 + 1/2
+x1 <- runif(50,-1,1)
+x2 <- runif(50,-1,1)
+x <- cbind(x1,x2)
+y <- ifelse(x2 > 0.5 + x1, +1, -1)
+
+PlotData <- function(x, y) {
+  plot(x, pch = ifelse(y > 0, "+", "-"), xlim = c(-1,1), ylim = c(-1,1), cex = 2)
+  abline(0.5,1)
+  points(c(0,0), c(0,0), pch = 19)
+  lines(c(0,-0.25), c(0,0.25), lty = 2)
+  arrows(-0.3, 0.2, -0.4, 0.3)
+  text(-0.45, 0.35, "w", cex = 2)
+  text(-0.0, 0.15, "b", cex = 2)
+}
+
+PlotData(x, y)
+```
+
+
+Si queremos ir modificando la learning rate
+```{r}
+learning_rate <- 0.01
+the_perceptron <- PerceptronFunction(x,y,learning_rate)
+predicted_y <- ClassifyLinear(x, the_perceptron$w, the_perceptron$b)
+# error
+print(sum(abs(y - predicted_y)))
+
+```
+
+
+1ºImprimir el numero de iteraciones. Hay que meterlo en la funcion de perceptron.
+2º learning rate: varia el numero de iteraciones al cambiar el learning rate?
+3ºArreglar el codigo para que saque la grafica de error(y)vsiteraciones(x).
+4ºGenerar un dataframe buscando que el modelo no converja, es decir crear un dataframe chungo. Que no converja pero que sea simple, buscando la frontera de donde se empieza a liar.
+5º Modificar el algoritmo metiendo un criterio de parada para el caso de que no converja. Un criterio tan sencillo como max(iteration = 100mil)
+
+EJERCICIOS 
+
+1. Saber el numero de iteraciones
+
+```{r}
+the_perceptron$steps
+```
+
+2. Representacion grafica
+
+```{r}
+df <- the_perceptron$datos
+plot(df$vector_iteraciones,df$vector_errores)
+```
+Como podemos ver, el error se mantiene constante hasta que llega un punto en el que empieza a caer. 
+
+
+3 y 4. 3 -Dataframe con muchos datos, buscando algo que no converja (sin tener que utilizar funciones muy complejas).
+4 - Ademas, modificar el algoritmo para que en caso de que no converja pare: introducir un criterio de parada en funcion del numero de iteraciones (probarlo con un nummero muy alto de iteraciones).
+
+```{r}
+# very easy
+# x2 = x1 + 1/2
+x1b <- runif(5000,-1,1)
+x2b <- runif(5000,-1,1)
+xb <- cbind(x1b,x2b)
+yb <- ifelse(x2b > 0.5 + x1b, +1, -1)
+
+GraficoData <- function(x, y) {
+  plot(x, pch = ifelse(y > 0, "+", "-"), xlim = c(-1,1), ylim = c(-1,1), cex = 2)
+  abline(0.5,1)
+  points(c(0,0), c(0,0), pch = 19)
+  lines(c(0,-0.25), c(0,0.25), lty = 2)
+  arrows(-0.3, 0.2, -0.4, 0.3)
+  text(-0.45, 0.35, "w", cex = 2)
+  text(-0.0, 0.15, "b", cex = 2)
+}
+GraficoData(xb, yb)
+```
+
+```{r}
+#antes de ejecutar esto hemos introducido en la funcion de perceptron el criterio iterations < 50000 para que no se quede R bloqueado
+
+learning_rate <- 0.1
+the_perceptron <- PerceptronFunction(xb,yb,learning_rate)
+predicted_y <- ClassifyLinear(x, the_perceptron$w, the_perceptron$b)
+print(sum(abs(y - predicted_y)))
+the_perceptron$steps
+
+```
+
+
+```{r}
+df2 <- the_perceptron$datos
+plot(df2$vector_iteraciones[0:8000],df2$vector_errores[0:8000])
+```
+
+
+
+4. Modificar el algoritmo para que en caso de que no converja pare: introducir un criterio de parada en funcion del numero de iteraciones (probarlo con un nÃumero muy alto de iteraciones).
+```{r}
+#hemos introducido el criterio iterations < 50000
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

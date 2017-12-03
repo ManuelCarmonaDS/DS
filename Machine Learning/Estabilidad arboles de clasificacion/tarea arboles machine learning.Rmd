@@ -1,0 +1,136 @@
+---
+title: "tareaMchinelearningArboles"
+author: Manuel Carmona Cabello de Alba
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#1-Carga de datos y análisis exploratorio
+
+Primero cargamos los datos y renombramos las variables para entender bien la informacion:
+```{r}
+setwd("C:/Users/Manuel/Desktop/CUNEF/MACHINE LEARNING/arboles")
+abalone <- read.table("abalone.data.txt", sep=",")
+
+names(abalone) <- c("Sex", "Length", "Diameter", "Height", "Whole weight", "Shucked weight", "Viscera weight", "Shell weight", "Rings" )
+head(abalone, 6)
+```
+
+Comprobamos de qué tipo es la información de la que disponemos
+```{r}
+str(abalone)
+```
+
+
+La variable Sex ya está en modo factor, pero vamos a renombrarla para que sea mas facil su lectura 
+```{r}
+abalone$Sex<- factor(abalone$Sex, levels=c("M","F", "I"),
+                   labels=c("male", "female", "infant"))
+```
+
+
+Comprobamos si existen valores perdidos y la distribución de los valores:
+```{r}
+summary(abalone)
+```
+Todo es correcto, procedemos a comprobar si existe o no inestabilidad. 
+
+
+#2-Muestra de entrenamiento y muestra de test
+
+Definimos una muestra aleatoria de aprendizaje del arbol
+```{r}
+set.seed(1234)
+train <- sample(nrow(abalone), 0.7*nrow(abalone))  #esto al azar el 70% de la muestra
+
+```
+
+La muestra de tes será el total de observaciones menos aquellas empleadas en la muestra de aprendizaje.
+```{r}
+abalone.train <- abalone[train,]   #con los elementos de la muestra que acabo de crear
+
+abalone.validate <- abalone[-train,]  #con los elementos restantes
+```
+
+Comprobamos valores
+```{r}
+table(abalone.train$Sex)
+
+table(abalone.validate$Sex)
+```
+Esta balanceado en distribucion si comparamos train y validate.
+
+#3-Primer arbol
+
+Estimamos un arbol con la función rpart y lo representamos para una mejor interpretacion:
+```{r}
+library(rpart)
+library(rpart.plot)
+
+# Estimamos el arbol
+
+arbol <- rpart(Sex ~ ., data=abalone.train, method="class",
+               parms=list(split="information"))
+
+print(arbol) #esta info sera mas completa con la representacion gráfica
+prp(arbol, type = 2, extra = 104,
+    fallen.leaves = TRUE, main="Decision Tree")
+
+summary(arbol)
+```
+Observamos que hay 4 nodos terminales. 
+
+
+#4-Segundo arbol
+
+Repetimos el proceso pero cambiando la semilla para ver si existe inestabilidad a la hora de generar el arbol. En el caso de que no exista aparentemente, variaremos la proporcion de muestra de entrenamiento y test para comprobar si realmente es estable.
+```{r}
+set.seed(888)
+train <- sample(nrow(abalone), 0.7*nrow(abalone))  #esto me selecciona al azar el 70% de la muestra
+
+```
+
+```{r}
+abalone.train <- abalone[train,]   #con los elementos de la muestra que acabo de crear
+
+abalone.validate <- abalone[-train,]  #con los elementos restantes
+```
+
+
+```{r}
+table(abalone.train$Sex)
+
+table(abalone.validate$Sex)
+```
+Esta balanceado en distribucion si comparamos train y validate
+
+
+
+```{r}
+library(rpart)
+library(rpart.plot)
+
+# Estimamos el arbol
+
+arbol <- rpart(Sex ~ ., data=abalone.train, method="class",
+               parms=list(split="information"))
+
+print(arbol) #esta info sera mas completa con la representacion gráfica
+prp(arbol, type = 2, extra = 104,
+    fallen.leaves = TRUE, main="Decision Tree")
+
+summary(arbol)
+```
+Como podemos observar, solo nos da 2 nodos terminales y cercena la posibilidad de que la observación sea mujer. Existe inestabilidad claramente. 
+
+
+
+
+
+
+
+
+

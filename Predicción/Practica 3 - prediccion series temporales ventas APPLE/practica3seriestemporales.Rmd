@@ -1,0 +1,490 @@
+---
+title: "Practica3 - predicci√≥n ventas Apple"
+author: "Manuel Carmona Cabello de Alba"
+date: "25 de noviembre de 2017"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+Cargamos las librerias que vamos a utilizar:
+```{r}
+library(quantmod) #Package to download financials historical data 
+library(moments) # Calculate Kurstosis and skewness
+library (ggplot2) #Plot library
+library(ggfortify) #Plot Monthplot
+library(plyr) #Using ddply with data.frames
+library(zoo)
+require(forecast)
+require(xts)
+library(base)
+library(tseries)
+library(forcats)
+library(timsac)
+library(TSA)
+library(e1071)
+library(ggthemes)
+library(reader)
+library(gridExtra)
+```
+
+
+Cargamos los datos y los visualizamos
+```{r}
+datos <- read.csv("C:/Users/Manuel/Desktop/CUNEF/Prediccion/Clase05/Datos/apple.csv", header=T, sep=",")
+datos<-datos[-1,]
+datos[is.na(datos)]<-0
+datos$totalsales<-datos$iPhone+datos$iPad+datos$iPod+datos$Mac
+datos
+```
+
+Cambiamos el formato para poder trabajar con los datos como serie temporal
+```{r}
+library(zoo)
+datos$Time<-as.Date(as.yearqtr(datos$Time, format="Q%q/%y"))
+str(datos$Time)
+```
+
+
+```{r}
+xVentas=xts((datos$totalsales),order.by=datos$Time) #la y mayuscula porque esta el a?o completo
+
+#Generate quarterly data
+xVentas=to.quarterly(xVentas)
+
+#Transform to zoo data (forecast package)
+zVentas=as.zoo(xVentas$xVentas.Close)
+```
+
+Pasamos el nombre a Ventas totales
+```{r}
+names(zVentas)="Ventas_totales"
+zVentas
+```
+
+Vamos a ver la serie
+```{r}
+
+apple.plot <- autoplot(as.ts(zVentas), ts.colour="dodgerblue3")+
+  labs(y="Sales",x="Year")+
+  ggtitle("Quarterly Sales - Apple")+
+  theme_minimal()+
+  geom_smooth(aes(y=(zVentas)),span=0.35,se=F,size=0.4,col="black")
+apple.plot
+```
+
+
+```{r}
+ggfreqplot(as.ts(zVentas),freq=4,nrow=1,facet.labeller=c("1Q","2Q","3Q","4Q"))+ggtitle("Quaterly sales")
+```
+Podemos obsevar que el cuarto trimestre del a?o es el que lidera las ventas, coincidiendo con la politica de lanzamiento de productos de Apple.  
+
+```{r}
+library(ggplot2)
+ggplot(datos, aes(x=Time, y=totalsales)) + geom_col()
+```
+En este gr?fico corroboramos la anterior afirmaci?n
+
+Descripcion de la serie:
+Tendencia: tiene tendencia positiva, no queda claro si es lineal o exponencial (componente aditivo o multiplicativo) y no tiene ciclo.
+Estacionalidad: Claramente existe componente estacional multiplicativo, como puede observarse en el primer trimestre de cada a?o.
+La serie es no estacionaria en varianza y EN MEDIA????
+
+
+#Modelos ETS
+Los modelos ETS solo asumen datos no estacionarios. As?, no tenemos que transformar la serie para estimar los modelos.
+Dentro de los modelos ETS, los que incluyen el componente estacional son los llamados  Holt-Winters. Vamos a estimar 4 modelos Holt-Winter y seleccionaremos uno en funcion de los criterios AIC, BIC y HQ.
+
+
+##Periodo entrenamiento y periodo test
+
+Vamos a coger un periodo de entrenamiento y uno de test para probar el modelo
+```{r}
+cOmit=4
+nObs=length(zVentas)
+oVentas <- window(zVentas,start=index(zVentas[1]),end=index(zVentas[nObs-cOmit]))
+```
+
+
+
+Modelo Holt-Winter (A,M)
+```{r}
+fitHWAM <- holt(oVentas, exponential=FALSE, damped=FALSE, seasonal="multiplicative")
+fitHWAM$model
+```
+
+
+Modelo Holt-Winter (Ad,M)
+```{r}
+fitHWAdM <- holt(oVentas,exponential=FALSE, damped=TRUE, seasonal="multiplicative")
+fitHWAdM$model
+```
+
+Modelo Holt-Winter (M,M)
+```{r}
+fitHWMM <- holt(oVentas,exponential=TRUE, damped=FALSE, seasonal="multiplicative")
+fitHWMM$model
+```
+
+Modelo Holt-Winter(Md,M)
+```{r}
+fitHWMdM <- holt(oVentas,exponential=TRUE, damped=TRUE, seasonal="multiplicative")
+fitHWMdM$model
+```
+Como podemos observar, seg?n los criterios de informacion los modelos aditivos funcionar?n peor. Vamos a graficar los modelos para comprobarlo.
+
+
+```{r}
+plot(fitHWAM,ylab="Ventas",
+     plot.conf=FALSE, type="o", fcol="orange", xlab="Year")
+lines(window(zVentas),type="o",col="blue")
+lines(fitted(fitHWAM), col="orange", lty=2)
+lines(fitted(fitHWAdM), col="red", lty=2)
+lines(fitted(fitHWMM), col="green", lty=2)
+lines(fitted(fitHWMdM), col="black", lty=2)
+lines(fitHWAdM$mean, type="o", col="red")
+lines(fitHWMM$mean, type="o", col="green")
+lines(fitHWMdM$mean, type="o", col="black")
+legend("topleft",lty=1, pch=1, col=c("blue","orange", "red", "green", "black"), 
+       c("data","HWAM", "HWAdM","HWMM", "HWMdM"))
+```
+(ARREGLAR GRAFICO)
+
+Ahora vamos a calcular el modelo de forma autom?tica:
+```{r}
+etsfit<-ets(oVentas)
+```
+
+Vemos los coeficientes, la puntuaci?n en los criterios de informaci?n y las predicciones. 
+```{r}
+coef(etsfit) #esto returns all fitted parameters.
+#forecast model
+#forecast model
+fventas.ets=forecast(etsfit, level=(c(75,25)))
+#Results
+summary(fventas.ets)
+```
+Obtenemos un modelo con un AIC mucho menor que los anteriores. El modelo es de tipo M,A,M, es decir, de error multiplicativo, tendencia aditiva y componente estacional multiplicativo. 
+
+
+```{r}
+#plot(fventas.ets)
+#lines(window(zVentas),type="o")
+
+plotets <- autoplot(fventas.ets)+ 
+  labs(y="Ventas",x="Tiempo")+
+  ggtitle("Prediccion Modelo ETS (M,A,M)")+
+  theme_minimal()+
+  scale_colour_economist()+
+  theme(legend.position = "bottom")
+plotets
+```
+Como vemos, se ajusta mucho mejor que los modelos anteriormente calculados. 
+
+
+Ahora vamos a calcular los trimestres y los comparas con lo real, vemos que en el 4T es donde mas me alejo. 
+```{r}
+comparativa<-as.data.frame(matrix(c(fventas.ets$mean[1:cOmit],zVentas[(nObs-cOmit+1):nObs]),ncol=2))
+names(comparativa)<-c("predicted","real")
+comparativa
+```
+
+
+Ahora predecimos con todo para ver en el plot que es lo que hace el modelo y demostrar el caracter cortoplacista.
+
+```{r}
+estfit2=ets(zVentas, damped=FALSE)
+f.estfit2=forecast(estfit2)
+plot(f.estfit2)
+lines(fitted(fventas.ets), col="orange", lty=2)
+lines(fventas.ets$mean, type="o", col="orange")
+
+plotets <- autoplot(f.estfit2)+ 
+  labs(y="Sales",x="Year")+
+  ggtitle("Forecast TEST Modelo ETS (M,A,M)")+
+  theme_minimal()+
+  scale_colour_economist()+
+  theme(legend.position = "bottom")
+plotets
+
+
+```
+Vemos la diferencia.
+
+
+
+#Modelos ARIMA
+
+Como sabemos la serie es no estacionaria. Para hacerla estacionaria y poder utilizar los modelos ARIMA hemos de tranformarla en estacionaria.
+
+##An?lisis de la serie: es estacionaria?
+
+El primer paso es hacerla estacionaria en varianza:
+```{r}
+zlVentas=log(zVentas)
+df_newl <- data.frame(value = as.vector(zlVentas),
+                     time = time(zlVentas))
+ggplot(df_newl)+geom_point(aes(x=time,y=value))+geom_line(aes(x=time,y=value))+ylab("Sales")+ggtitle("Quarterly Sales LOG Apple")+xlab("Quarter")
+```
+Ahora como vemos la serie es estacionaria en varianza tras aplicar la transformaci?n m?s habitual, la logar?tmica (logaritmo neperiano).
+
+```{r}
+ggtsdisplay(zlVentas)
+```
+claramente la serie es no estacionaria. Los valores de hoy dependen de los de hace 15 periodos.
+
+
+Para transformar la serie a estacionaria en media, tenemos que aplicar el operador diferencias. Vamos a realizar la diferencia de primer orden, que consiste en restar a la serie original la misma serie pero retardar un periodo:
+```{r}
+ggtsdisplay(diff(zlVentas)) #tasa intertrimestral, aunque parece estacionaria, si vemos la correlacion estacional en el grafico de abajo a la izq, 
+#vemos que en la parte esacional no cae (barritas para arriba parecidas) por eso no es estacionaria. NO se puede predecir
+```
+Con la diferencia obtenemos la tasa intertrimestral. Aunque parece estacionaria, si vemos la correlacion estacional en el grafico de abajo a la izquierda vemos que en la parte esacional no cae (barritas para arriba parecidas), por eso no es estacionaria. 
+
+
+Vamos a hacer la diferencia de orden 4 (anual) 
+```{r}
+
+ggtsdisplay(diff(zlVentas,4)) 
+```
+Aqui observamos la tasa, aqui si observamos un ciclo, se ve que es estacionario. Si a algo estacionario le haces 1 diferencia, sigue siendo estacionario.
+
+
+Ahora haremos la segunda diferencia para ver como crece la tasa de variaci?n anual a modo ilustrativo
+```{r}
+ggtsdisplay(diff(diff(zlVentas,4),1)) 
+```
+como crece la tasa de variacion anual? le hago una diferencia.estos ejemplos son para ver que podemos calcular las tasas de variacion inter anual e intertrimestral. 
+
+
+
+##Estimacion del modelo ARIMA
+
+###Estimacion del modelo 
+
+Estimamos el modelo ARIMA con la funcion autoarima y marcando lambda=0 ya que queremos transformar la serie a estacionaria con la transformacion mas habitual,la logaritmica (logaritmo neperiano), que es un caso particular de la transformacion Box-Cox cuando el parametro lambda es cero.
+```{r}
+fitARIMA=auto.arima(oVentas,lambda=0) 
+summary(fitARIMA)
+```
+Obtenemos un modelo SARIMA, ARIMA con componente estacional ARIMA(1,0,0)(1,1,0)[4]. El componente principal tiene componente autorregresivo de 1 retardo. El componente estacional igual, y adem?s requiere de una diferencia para hacer la serie estacionaria en media. Ninguno de los componentes depende de los errores que tuvieron lugar anteriormente. El [4] nos indica anualidad (4 trimestres) tal y como habiamos observado anteriormente aplicando las diferencias de forma manual para entender la serie. 
+
+Obtenemos un AIC mucho menor al que obteniamos con los modelos ETS. Esto tiene sentido puesto que los modelos ETS tienen un caracter cortoplacista muy marcado.
+
+
+
+Vamos a probar estimandolo sin las funciones de aproximacion y stepwise de auto.arima, de forma que se exploren todos los modelos posibles. 
+```{r}
+fitARIMA2=auto.arima(oVentas,lambda=0, approximation = F, stepwise = F) 
+summary(fitARIMA2)
+```
+El modelo que se obtiene tiene mejor AIC pero peor BIC. Ante la duda, conviene comprobar como predicen ambos modelos. 
+
+
+
+###Analisis de resiudos
+```{r}
+ggtsdisplay(fitARIMA$residuals)
+ggtsdisplay(fitARIMA2$residuals)
+```
+Como podemos observar prestando atencion a las bandas, los residuos se pueden calificar de ruido blanco. Aun as?, vamos a realizar un test para comprobar que, efectivamente, los residuos son ruido blanco. 
+
+Realizaremos el test de Box-Ljung, que consiste en contrastar si los retardos de la acf son cero a la vez:
+```{r}
+Box.test(fitARIMA$residuals,lag=4, fitdf=3, type="Lj")
+Box.test(fitARIMA$residuals,lag=8, fitdf=3, type="Lj")
+Box.test(fitARIMA$residuals,lag=12, fitdf=3, type="Lj")
+
+
+
+Box.test(fitARIMA2$residuals,lag=4, fitdf=3, type="Lj")
+Box.test(fitARIMA2$residuals,lag=8, fitdf=3, type="Lj")
+Box.test(fitARIMA2$residuals,lag=12, fitdf=3, type="Lj")
+```
+H0: ruido blanco, H1:no es ruido blanco. En ambos modelos podemos considerar que los residuos son ruido blanco. 
+fitdf es el n√∫mero de par√°metros que hemos estimado para obtener los residuos. Si estimas un Arma(1,1) con constante son 3. Cuando es la serie temporal antes de estimar un modelo sera cero.
+
+
+Vamos a ver como predicen ambos modelos.
+
+Primero estimamos las predicciones
+```{r}
+fventas.arima=forecast(fitARIMA)
+fventas.arima=forecast(fitARIMA, level=c(70,90)) #podemos cambiar el intervalo
+
+
+fventas.arima2=forecast(fitARIMA2, level=c(70,90))
+
+```
+
+
+Creamos un dataframe con la serie (zVentas) para poder representar el comportamiento del modelo y Graficamos:
+```{r}
+df_newl<- data.frame(value = as.vector(zVentas),
+                     time = time(zVentas))
+
+
+
+ggplot(df_newl)+geom_point(aes(x=time,y=value))+geom_line(aes(x=time,y=value))+ geom_forecast(fventas.arima,alpha=0.4)+ggtitle("ARIMA: Apple Forecast")
+
+
+ggplot(df_newl)+geom_point(aes(x=time,y=value))+geom_line(aes(x=time,y=value))+ geom_forecast(fventas.arima2,alpha=0.4)+ggtitle("ARIMA2: Apple Forecast")
+
+```
+
+Con autoplot:
+```{r}
+plotarima <- autoplot(fventas.arima)+
+        labs(y="Sales",x="Year")+
+        ggtitle("Forecast ARIMA")+
+        theme_minimal()+
+        scale_color_economist()+
+        theme(legend.position = "bottom")
+plotarima
+
+
+plotarima2 <- autoplot(fventas.arima2)+
+  labs(y="Sales",x="Year")+
+  ggtitle("Forecast ARIMA2")+
+  theme_minimal()+
+  scale_color_economist()+
+  theme(legend.position = "bottom")
+plotarima2
+```
+La prediccion es la linea azul. Vemos la clara diferencia entre ambos modelos, siendo el modelo ARIMA (1,0,0)(1,1,0)[4] un poco mejor que el modelo ARIMA2 (1,0,3)(0,1,1)[4].
+
+Si prestamos atencion a las predicciones del modelo ARIMA, observamos como en los Q4 el modelo estima unas ventas notablemente mayores a las de los otros trimestres.
+```{r}
+fventas.arima
+```
+
+
+
+#Comparacion ETS y ARIMA
+
+Vamos a comparar los graficos de los dos modelos elegidos:
+```{r}
+grid.arrange(plotets,plotarima,ncol=2)
+```
+
+
+
+
+#ANALISIS DE INTERVENCION
+
+vamos a comprobar si podemos mejorar el modelo utilizando un modelo ARIMAX.
+
+Para ello tenemos ver si hay que practicar analisis de intervencion.
+
+
+Lo primero es observar el grafico de crecimiento (graficamos zlVentas)
+```{r}
+ggplot(df_newl)+geom_point(aes(x=time,y=value))+geom_line(aes(x=time,y=value))+ylab("Sales")+ggtitle("Quarterly Sales LOG Apple")+xlab("Quarter")
+```
+Se puede observar un incremento de las ventas notable en el Q3 de 2004. Esto coincide con el lanzamiento de la 4∫ generacion de iPods. Podemos ver el escalon que tiene lugar en 2004 y que se mantiene en el tiempo. https://www.cnet.com/pictures/the-complete-history-of-apples-ipod/
+
+En el Q4 de 2010 comienza el verdadero crecimiento exponencial de la compaÒÌa como consecuencia del lanzamiento de iPhone 4, que marco un antes y un despues en la telefonia movil y en la trayectoria de Appel. Podriamos considerar aquÌ otro escalÛn, sin embargo, teniendo en cuenta que despuÈs del lanzamiento del iPhone 4 cada Q4 Apple obtiene un crecimiento de las ventas considerable con cada nuevo lanzamiento, considero que la suma de las intervenciones de Apple forman parte intrÌnseca de la tendencia en sus ventas y, por tanto, las asumo como hechos normales. 
+
+ConsiderarÈ ˙nicamente el escalÛn que provoca el lanzamiento de la cuarta generaciÛn de iPods a la hora de estimar el modelo ARIMAX, ya que se trata de la intervenciÛn que da lugar al germen de crecimiento de las ventas de Apple. 
+
+```{r}
+tsdisplay(diff(zlVentas,4))
+```
+
+##ARIMAX
+
+```{r}
+
+fitARIMAX=arimax(log(zVentas),order=c(1,0,0),
+              seasonal=list(order=c(1,1,0),period=4),
+              xtransf=data.frame(iPod2004=1*(seq(zVentas)==25)),
+              transfer=list(c(1,0)),
+              method='ML')
+
+fitARIMAX
+```
+Obtenemos un modelo con menos AIC que el anterior ARIMA, aunque no es del todo correcto comparar ARIMA y ARIMAX en criterios de informaciÛn.  
+
+
+Graficamos el modelo
+```{r}
+plot(log(zVentas), ylab="zlVentas")
+points(fitted(fitARIMAX))
+
+
+```
+
+
+
+##Outliers
+
+###Aditivos
+Tiene valores atipicos aditivos el modelo?
+```{r}
+detectAO(fitARIMAX)
+```
+El modelo detecta 2 aditivos. Tendremos que comprobar si efectivamente se trata de outliers o si se trata de intervenciones. En este caso no se trata de intervenciones
+
+###Innovativos
+Tiene valores atipicos innovativos el modelo?
+```{r}
+detectIO(fitARIMAX)
+```
+Existe un valor atipico innovativo. Los valores atipicos innovativos afectan al error y empeoran los modelos. 
+
+
+
+
+```{r}
+autoplot(fitARIMAX$residuals)
+```
+La caida que hay al final del a?o 2000, en el Q4, contrasta mucho con el resto de la tendencia. Hemos visto que el Q4 es el trimestre con mas ventas a?o tras a?o y que sirve de propulsor para el crecimiento en la facturacion de Apple. 
+
+Vamos a estimar el modelo ARIMAX para ver si mejora definiendo el outlier innovativo
+```{r}
+
+fitARIMAX2=arimax(log(zVentas),order=c(1,0,0),
+              seasonal=list(order=c(1,1,0),period=4),
+              xtransf=data.frame(iPod2004=1*(seq(zVentas)==25)),
+              transfer=list(c(1,0)),
+              io=c(8,24,23),
+              method='ML')
+
+fitARIMAX2
+```
+El AIC del modelo disminuye. El criterio de informaciÛn del modelo mejora mucho AIC=-44.2
+
+#####Aditivos
+Tiene valores atipicos aditivos el modelo?
+```{r}
+detectAO(fitARIMAX2)
+```
+El modelo detecta 2 aditivos. Tendremos que comprobar si efectivamente se trata de outliers o si se trata de intervenciones. En este caso no se trata de intervenciones
+
+####Innovativos
+Tiene valores atipicos innovativos el modelo?
+```{r}
+detectIO(fitARIMAX2)
+```
+Se eliminan los valores atÌpicos innovativos completamente.
+
+Graficamos el modelo
+```{r}
+plot(log(zVentas), ylab="zlVentas")
+points(fitted(fitARIMAX2))
+```
+
+
+#Conclusiones
+A lo largo de la practica hemos comprobado que los tres modelos, ETS, ARIMA y ARIMAX2, se ajustan bastante bien aunque con diferencias.
+
+En funcion del objetivo que tengamos dentro del negocio, utilizaremos un modelo u otro. Es posible que convenga utilizar el modelo ETS para predecir a muy corto plazo, a 1 o 2 trimestres. 
+
+A la hora de predecir periodos mas lejanos, convendra utilizar el modelo ARIMA o el modelo ARIMAX. Lo ideal, dado el objeto de an·lisis y la incertidumbre inherente a cualquier prediccion, seria combinar ambos modelos para fundamentar mejor las decisiones. 
+
+

@@ -1,0 +1,312 @@
+---
+title: "EJERCICIOS GRADIENTE"
+author: "Manuel Carmona"
+date: "17 de noviembre de 2017"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+setwd("C:/Users/Manuel/Desktop/CUNEF/MACHINE LEARNING/clase04/")
+datos<- read.csv("4_1_data.csv" , header = TRUE)
+
+```
+
+
+#1- Análisis exploratorio
+```{r}
+summary(datos)
+colSums(is.na(datos))
+```
+
+##  Graficamos los datos
+```{r}
+plot(datos$score.1, datos$score.2, col = as.factor(datos$label), xlab = "score.1", ylab = "score.2")
+```
+
+## Dataset de entrenamiento y test
+
+```{r}
+# tomamos una muestra de training y otra de test
+set.seed(123)
+n = nrow(datos)
+id_train <- sample(1:n, 0.80*n)  # Asignamos el 80 % al entrenamiento.
+datos.train <- datos[id_train,]
+datos.test <- datos[-id_train,]
+```
+
+# Creo las variables X e Y de entrenamiento y test.
+```{r}
+# Matrices de Train
+
+Xtrain <- as.matrix(datos.train[,c(1,2)])
+Xtrain <- cbind(rep(1,nrow(Xtrain)),Xtrain)
+Ytrain <- as.matrix(datos.train$label)
+
+# Matrices de Test
+
+Xtest <- as.matrix(datos.test[,c(1,2)])
+Xtest <- cbind(rep(1,nrow(Xtest)),Xtest)
+Ytest <- as.matrix(datos.test$label)
+```
+
+
+
+
+#3-  Sigmoide
+
+Defino la funcion (Pi/(1-Pi)) y las matrices Xi e Yi de mi modelo logit. Aun engo que estimar las Betas.
+
+La ecuación de una regresión logística es ln(Pi/(1-Pi))=beta1+beta1*x1+...+u. Por tanto, si queremos saber pi, hay que despejar la función haciendo: pi=1/(1+exp(-z))
+
+```{r}
+# Ecuación de la sigmoide.
+
+sigmoid<- function(x){
+         1/(1+exp(-x))
+}
+ 
+# grafico de la sigmoide
+
+ x<- seq(-5,5,0.01)
+ plot(x,sigmoid(x), col="blue", ylim= c(-.2,1))
+ abline(h=0, v=0, col = "gray60")
+ 
+```
+
+# 4- Funcion de costes
+
+La función de costes es nuestra función objetivo, es decir la función que queremos minimizar reduciendo su coste.En éste caso, el coste representa los errores que se cometen al estimar la variable dependiente y (label). Para ello, se deberán de estimar los parámetros adecuados para que ésta función tome el mínimo valor. En la función de regresión los parámetros representan los betas por los que se multiplica el valor de cada observación de las variables explicativas, en este caso, score.1 y score.2:
+
+```{r}
+funcionCostes <- function(parametros, x, y) {
+  
+  n <- nrow(x)
+  g <- sigmoid(x %*% parametros)  # %*% este simbolo se define como multiplicaci?n de matrices
+  j <-  ((-1)/n)*sum((y*log(g))+(1-y)*log(1-g))
+}
+```
+
+# 5- Inicio los parametros y calculo el coste inicial con estos parámetros
+
+Si se toma como parámetros iniciales (0,0,0), el cote inicial de la función es 0.69, el objetivo es reducir éste porcentaje de coste.
+```{r}
+initial_parameters <- rep(0, ncol(Xtrain))  
+# Hago una columna de 0 para el término independiente. La b quiero tratarla como una w. La b no está multiplicada por X en la ecuación. Para hacer producto matricial hago esto. Simplifico las operaciones y lo uno todo en un producto de matrices.
+ 
+funcionCostes(initial_parameters, Xtrain, Ytrain)  
+# El error que me saldría si fijo los parámetros a 0. Estás acertando que no entre nadie a la universidad.
+
+print(paste("El coste inicial de la funcion es: ", 
+              convergence <- c(funcionCostes(initial_parameters, Xtrain, Ytrain)), sep = ""))
+```
+
+
+# 6- Descenso del gradiente.
+
+
+## Gráfica nºiter/coste
+```{r}
+# vamos a crear una funcion para obtener un mapa de puntos de las iteraciones y poder representar como influyen el numero de iteraciones en la funcion de costes y en el numero optimo de parametros
+GraficaCosteIteraciones=function(iteraciones){
+        posicion <- NULL
+        coste <- NULL
+        contador <- 0
+        for(i in (1: iteraciones)) {
+                contador <- contador + 1
+                parametros_optimizados <- optim(par = initial_parameters, fn = funcionCostes, x = Xtrain, y = Ytrain, control = list(maxit = contador))
+                parametros <- parametros_optimizados$par
+                posicion <- c(posicion,i)
+                coste <- c(coste,funcionCostes(parametros,Xtrain,Ytrain))
+        }
+        df_coste <- data.frame(posicion,coste)
+        
+        print(plot(df_coste$posicion,df_coste$coste))
+        
+        return(df_coste)
+}
+```
+
+
+```{r}
+resultados <- GraficaCosteIteraciones(150)
+df_iter_coste <- data.frame(resultados$posicion,resultados$coste)
+```
+
+Podemos ver que el numero de iteraciones que minimiza el coste es 148
+```{r}
+df_iter_coste[df_iter_coste$resultados.coste == min(df_iter_coste$resultados.coste),]
+```
+
+
+
+EJERCICIO2
+```{r}
+GraficaCosteIteraciones(148)
+```
+
+
+## Creamos la funcion TestGradiente
+Incluimos las definiciones anteriores en una funcion que facilite el trabajo. 
+```{r}
+TestGradiente <- function(iteraciones, x, y){
+  
+        parametros_optimizados <- optim(par = initial_parameters, fn = funcionCostes,
+                                        x = Xtrain, y = Ytrain, control = list(maxit = iteraciones))
+        print(parametros_optimizados)
+        
+        parametros <- parametros_optimizados$par
+        
+        print(paste("Final Cost Function value: ", 
+                    convergence <- c(funcionCostes(parametros, x, y)), sep = ""))
+        
+        return(parametros )
+  
+}
+
+TestGradiente(150, Xtrain, Ytrain)  
+```
+
+# 7 - Comprobamos que los resultados son correctos
+
+Llamamos parametros a los parámetros óptimos.
+```{r}
+# install.packages("testthat")
+library(testthat)
+
+parametros <- TestGradiente(150,x = Xtrain, y = Ytrain)
+# probability of admission for student (1 = b, for the calculos)
+new_student <- c(1,25,78)
+print("Probability of admission for student:")
+print(prob_new_student <- sigmoid(t(new_student) %*% parametros))
+
+
+test_that("Test TestGradiente",{
+  parametros <- TestGradiente(150, x = Xtrain, y = Ytrain)
+
+  new_student <- c(1,25,78)
+  prob_new_student <- sigmoid(t(new_student) %*% parametros)
+  print(prob_new_student)
+  expect_equal(as.numeric(round(prob_new_student, digits = 8)), 0.02705205)
+
+})
+```
+
+
+
+#8-Matriz de confusión y % acierto
+
+En primer lugar debemos predecir con la muestra de testing como paso previo a hacer la matriz de confusión.
+
+```{r}
+prediccion_prob <- sigmoid(Xtest %*% parametros)
+# probabilidades
+prediccion_prob<-data.frame(prediccion_prob)
+
+```
+
+Creamos una funcion que calcule la matriz de confusion:
+```{r}
+#definimos una funcion para crearla en funcion de prediccion_prob. Pongo que me devuelva tambien el acurracy
+matrizConfusion = function(prediccion_prob){
+        resultado1 <- NULL
+        for (i in (1:nrow(prediccion_prob))){
+                ifelse(1- prediccion_prob[i,1] < 0.5, resultado1 <- c(resultado1,1),resultado1 <- c(resultado1,0))
+        }
+        prediccion_prob[,"resultado"] <- resultado1
+        prediccion_test <- prediccion_prob[,2]
+        accuracy<-100*sum(diag(table(Ytest, prediccion_prob$prediccion_prob)))/sum(table(Ytest, prediccion_prob$prediccion_prob))
+        
+        print(paste("El accuracy es: ", accuracy))
+
+        return(table(Ytest,prediccion_test))
+}
+matrizConfusion(prediccion_prob)
+```
+
+
+Una forma alternativa de calcular la matriz:
+```{r}
+prediccion_prob[abs(prediccion_prob-1)<abs(prediccion_prob-0)]=1
+prediccion_prob[abs(prediccion_prob-1)>=abs(prediccion_prob-0)]=0
+table(Ytest, prediccion_prob$prediccion_prob)
+```
+
+
+##Comprobamos la estabilidad del modelo
+
+La pregunta que nos realizamos ahora es: ¿Es estable el modelo? 
+Para responderla vamos a cambiar las muestras de training y test y compararemos resultados. La inestabilidad se da cuando hay un porcentaje significativo de diferencia entre lo que dice un modelo y lo que dice otro. No existe un limite concreto que defina ese porcentaje, depende del contexto.
+
+## Dataset de entrenamiento y test
+Cambiamos la semilla para ver si el modelo es estable
+```{r}
+# tomamos una muestra de training y otra de test
+set.seed(456)
+n = nrow(datos)
+id_train <- sample(1:n, 0.80*n)  # Asignamos el 80 % al entrenamiento.
+datos.train <- datos[id_train,]
+datos.test <- datos[-id_train,]
+```
+
+## Creo las variables X e Y de entrenamiento y test.
+```{r}
+# Matrices de Train
+
+Xtrain <- as.matrix(datos.train[,c(1,2)])
+Xtrain <- cbind(rep(1,nrow(Xtrain)),Xtrain)
+Ytrain <- as.matrix(datos.train$label)
+
+# Matrices de Test
+
+Xtest <- as.matrix(datos.test[,c(1,2)])
+Xtest <- cbind(rep(1,nrow(Xtest)),Xtest)
+Ytest <- as.matrix(datos.test$label)
+```
+
+##Vemos la grafica de nuevo
+```{r}
+GraficaCosteIteraciones(148)
+```
+Como vemos, la gráfica cambia. Tenemos que comprobar si la matriz de confusion (output del modelo) cambia de forma significativa o no. 
+
+Aplicamos la función TestGradiente para comprobarlo:
+```{r}
+TestGradiente(150, Xtrain, Ytrain) 
+```
+
+```{r}
+parametros <- TestGradiente(150, x = Xtrain, y = Ytrain)
+# probability of admission for student (1 = b, for the calculos)
+new_student <- c(1,25,78)
+print("Probability of admission for student:")
+print(prob_new_student <- sigmoid(t(new_student) %*% parametros))
+
+
+test_that("Test TestGradiente",{
+  parametros <- TestGradiente(150, x = Xtrain, y = Ytrain)
+
+  new_student <- c(1,25,78)
+  prob_new_student <- sigmoid(t(new_student) %*% parametros)
+  print(prob_new_student)
+  expect_equal(as.numeric(round(prob_new_student, digits = 8)), 0.01081858)
+
+})
+```
+
+```{r}
+prediccion_prob <- sigmoid(Xtest %*% parametros)
+# probabilidades
+prediccion_prob<-data.frame(prediccion_prob)
+
+matrizConfusion(prediccion_prob)
+```
+El modelo no es inestable ya que no se da un cambio significativo en el ouput.
+
+
+
