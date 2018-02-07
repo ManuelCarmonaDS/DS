@@ -1,0 +1,822 @@
+---
+title: "give me some credit version definitiva"
+author: "Manuel Carmona"
+date: "18 de enero de 2018"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+librerias a utilizar:
+```{r}
+library(ggplot2)
+library(dplyr)
+library(ROCR)
+library(mice)
+library(randomForest)
+library(xgboost)
+library(stats)
+library(corrplot)
+library(Matrix)
+library(knitr)
+```
+
+#Introduccion
+ 
+El objetivo de esta investigación es desarrollar un algoritmo de credit scoring para clasificar los individuos como aptos o no para recibir un crédito. Con el objetivo de clasificar a los individuos se obtendrán las probabilidades de tener estrés financiero en los próximos dos años.
+ 
+Para cumplir estos objetivos se nos facilita dos datasets: uno para entrenar al modelo y otro validar los resultados. El dataset de entrenamiento cuenta con 150.000 registros y el de validación con cerca de 105.000. Adicionalmente se nos facilita un diccionario para comprender las distintas variables.
+ 
+SeriousDlqin2yrs: Persona que ha incumplido sus obligaciones durante más de 90 días en los dos últimos años.
+RevolvingUtilizationOfUnsecuredLines: Balance total en las tarjetas de crédito dividido entre el límite de crédito.
+Age: edad del prestatario
+NumberOfTime30-59DaysPastDueNotWorse: número de veces que una persona ha pagado entre 30 y 59 días tarde en los dos últimos años.
+DebtRatio: cuota préstamo entre los ingresos mensuales.
+MonthlyIncome: Ingresos mensuales
+NumberOfOpenCreditLinesAndLoans: Número de préstamos y líneas de crédito abiertos.
+NumberOfTimes90DaysLate: número de veces que una persona ha pagado mas de 90 días tarde.
+NumberOfTime60-89DaysPastDueNotWorse: número de veces que una persona ha pagado entre 60 y 89 días tarde en los dos últimos años.
+NumberOfDependents: número dependientes a su cargo.
+Los algoritmos que hemos utilizado son: GLM, Random Forest y XGBoost.
+
+
+
+#Tratamiento, limpieza y transformacion del conjunto de datos. 
+
+
+
+
+```{r, include=FALSE}
+data_training <- read.csv("C:/Users/Manuel/Desktop/CUNEF/MACHINE LEARNING/give me some credit/cs-training.csv",
+                          stringsAsFactors = FALSE)
+```
+
+```{r}
+str(data_training)
+```
+
+```{r, include=FALSE}
+data_training_imputacion <- data_training[,-1]
+```
+
+
+Resumen estadístico:
+Comprobamos 
+
+```{r}
+summary(data_training)
+```
+
+```{r, include=FALSE}
+data_training[,"NAincome"] <- data_training$MonthlyIncome
+data_training$NAincome[!is.na(data_training$NAincome)] <- 0
+data_training$NAincome[is.na(data_training$NAincome)]<- 1
+```
+
+
+```{r, include=FALSE}
+data_training[,"NAdependents"] <- data_training$NumberOfDependents
+data_training$NAdependents[!is.na(data_training$NAdependents)] <- 0
+data_training$NAdependents[is.na(data_training$NAdependents)]<- 1
+```
+
+
+```{r, include=FALSE}
+data_training$MonthlyIncome[is.na(data_training$MonthlyIncome)]<- 0
+data_training$NumberOfDependents[is.na(data_training$NumberOfDependents)]<- 0
+```
+
+###Partir muestra
+
+```{r, include=FALSE}
+smp_size<-floor(0.8*nrow(data_training)) #calculamos tamaño
+
+set.seed(123) #para hacer la particion reproducible
+train_ind<-sample(seq_len(nrow(data_training)), size=smp_size)
+
+train_basic<-data_training[train_ind,] #train
+test_basic<-data_training[-train_ind,] #test
+```
+
+
+```{r, include=FALSE}
+train_basic<-train_basic[,-1]
+test_basic<-test_basic[,-1]
+```
+
+```{r, include=FALSE}
+summary(train_basic$MonthlyIncome)
+```
+
+
+```{r, include=FALSE}
+train_basic$SeriousDlqin2yrs<-as.factor(train_basic$SeriousDlqin2yrs)
+train_basic$NAdependents<-as.factor(train_basic$NAdependents)
+train_basic$NAincome<-as.factor(train_basic$NAincome)
+
+test_basic$SeriousDlqin2yrs<-as.factor(test_basic$SeriousDlqin2yrs)
+test_basic$NAdependents<-as.factor(test_basic$NAdependents)
+test_basic$NAincome<-as.factor(test_basic$NAincome)
+```
+
+```{r, include=FALSE}
+str(train_basic)
+```
+
+
+##IMPUTACION MICE
+
+```{r, include=FALSE}
+library(mice)
+```
+
+
+```{r, include=FALSE}
+imputed_data_train_mice <- mice(data_training_imputacion,m=5,method = "pmm",maxit = 3)
+
+```
+
+ 
+```{r, include=FALSE}
+
+datos_imputados_train1 <- complete(imputed_data_train_mice,1)
+
+datos_imputados_train2 <- complete(imputed_data_train_mice,2)
+
+datos_imputados_train3 <- complete(imputed_data_train_mice,3)
+
+datos_imputados_train4 <- complete(imputed_data_train_mice,4)
+
+datos_imputados_train5 <- complete(imputed_data_train_mice,5)
+
+datos_imputados_train <- (datos_imputados_train2+datos_imputados_train2+datos_imputados_train3+datos_imputados_train4+datos_imputados_train5)/5
+
+```
+
+
+```{r}
+smp_size_imp<-floor(0.8*nrow(datos_imputados_train)) #calculamos tamaño
+
+set.seed(123) #para hacer la particion reproducible
+train_ind_imp<-sample(seq_len(nrow(datos_imputados_train)), size=smp_size_imp)
+
+train_imputacion<-datos_imputados_train[train_ind_imp,] #train
+test_imputacion<-datos_imputados_train[-train_ind_imp,] #test
+```
+
+```{r}
+train_imputacion2<-train_imputacion
+
+train_imputacion2$SeriousDlqin2yrs<-as.factor(paste(train_imputacion2$SeriousDlqin2yrs))
+
+```
+
+
+
+```{r}
+test_imputacion2<-test_imputacion
+
+test_imputacion2$SeriousDlqin2yrs<-as.factor(paste(test_imputacion2$SeriousDlqin2yrs))
+
+```
+
+
+#Analisis descriptivo de los datos e identificación de atípicos
+
+A fin de entender mejor los datos, vamos a proceder a identificar los valores atípicos. Esto no significa que vayamos a eliminar dichas observaciones.
+
+De las variables que hay una mayor diferencia entre el tercer cuartil y el valor máximo como son:
+
+- RevolvingUtilizationOfUnsecuredLines
+- NumberOfTime30.59DaysPastDueNotWorse
+- DebtRatio
+- MonthlyIncome
+- NumberOfTimes90DaysLate
+- NumberOfTime60.89DaysPastDueNotWorse
+
+Vamos a analizar la distribución de valores para detectar outliers o valores atípicos en la distribución.
+
+El Debt ratio: nos indica el porcentaje de cuotas de amortización de deuda sobre los ingresos mensuales. 
+
+Dividimos en una tabla las observaciones del Dataset en función de si Debt Ratio es superior a 4 (un valor atípico, ya que no es normal que la cuota mensual de deuda sea 4 veces superiores a los ingresos mensuales, para hacer frente a dichos pagos se debería vender instrumentos de capital o bien incumplir en las obligaciones) y de si incumple o no sus obligaciones (1 o 0 en la variable SeriousDlqin2yrs). 
+
+
+```{r}
+ggplot(datos_imputados_train) + 
+  geom_histogram(mapping = aes(x = DebtRatio)) +
+  coord_cartesian(ylim = c(0, 100))
+```
+
+Hay tantas observaciones en las bins comunes que las inusuales se hacen tan pequeñas en el grafico que apenas podemos verlas.
+
+```{r}
+ggplot(datos_imputados_train) + 
+  geom_histogram(mapping = aes(x = DebtRatio)) +
+  coord_cartesian(xlim = c(0, 50000),ylim=c(0,500))
+```
+
+En este sentido, con el objetivo de facilitar la visión de las observaciones atípicas vamos a hacer zoom en el eje. Observamos que a partir de 16000 ya son outliers en debt ratio. 
+
+
+
+```{r}
+datos_imputados_train %>% 
+filter(DebtRatio> 16000) %>% 
+        count(SeriousDlqin2yrs)
+```
+
+Vemos la distribución de la variable SeriousDlqin2yrs en aquellos que tiene un DebtRatio superior a 16.000 y vemos que muchos no incumplen lo cual no tiene mucho sentido, observamos su comportamiento en el resto de variables.
+
+```{r}
+datos_imputados_train %>% 
+filter(DebtRatio> 16000) %>% 
+        summary()
+```
+
+Si filtramos la distribución de aquellos con un ratio superior a 16000 observamos una serie de características que, en conjunto, no tienen sentido al referirnos a individuos con un nivel de deuda altísimo:
+-   No tienen ingresos. El ingreso medio es de 135, con mediana y 3º cuartil en 0. 
+-   No llegan tarde a los pagos
+-   No hay apenas incumplimiento, solo un 13%. Con las características anteriores es algo poco probable. 
+Por tanto, todo parece indicar que son observaciones aberrantes y, probablemente, sean erróneos. 
+
+
+Monthly Income:
+
+```{r}
+ggplot(data = datos_imputados_train) +
+  geom_histogram(mapping = aes(x = MonthlyIncome),binwidth = 50000)
+```
+
+Hay tantas observaciones en las bins comunes que las inusuales se hacen tan pequeñas en el grafico que apenas podemos verlas.
+
+```{r}
+ggplot(datos_imputados_train) + 
+  geom_histogram(mapping = aes(x = MonthlyIncome)) +
+  coord_cartesian(ylim = c(0, 500),xlim=c(0,1000000))
+```
+
+
+Del mismo modo, identificamos que las observaciones con ingresos mensuales superiores a 28000 son observaciones atípicas.
+
+```{r}
+datos_imputados_train %>% 
+filter(MonthlyIncome> 200000) %>% 
+        summary()
+```
+
+NumberOfTime30.59DaysPastDueNotWorse: 
+
+```{r}
+ggplot(data = datos_imputados_train) +
+  geom_histogram(mapping = aes(x = NumberOfTime30.59DaysPastDueNotWorse))
+```
+
+
+```{r}
+ggplot(datos_imputados_train) + 
+  geom_histogram(mapping = aes(x = NumberOfTime30.59DaysPastDueNotWorse)) +
+  coord_cartesian(ylim = c(0, 500))
+```
+
+
+NumberOfTime60.89DaysPastDueNotWorse:
+
+Podemos observar como aparecen sin ningún sentido valores por encima de 90, los cuales podemos considerarlos como erratas. Probablemente se deba a una imputación por defecto del sistema de registros.
+
+```{r}
+ggplot(datos_imputados_train) + 
+  geom_histogram(mapping = aes(x = NumberOfTime60.89DaysPastDueNotWorse)) +
+  coord_cartesian(ylim = c(0, 500))
+```
+
+
+Ocurre exactamente lo mismo con la variable time60.89days.
+
+
+De los valores que tienen mas de 90 en NumberOfTime30.59DaysPastDueNotWorse vemos la distribucion de la variable NumberOfTime60.89DaysPastDueNotWorse
+
+```{r}
+datos_imputados_train %>% 
+filter(NumberOfTime30.59DaysPastDueNotWorse > 90) %>% 
+        count(NumberOfTime60.89DaysPastDueNotWorse)
+```
+
+
+```{r}
+datos_imputados_train %>% 
+filter(NumberOfTime60.89DaysPastDueNotWorse > 90) %>% 
+        count(NumberOfTime30.59DaysPastDueNotWorse)
+```
+
+
+```{r}
+ggplot(data = datos_imputados_train) +
+  geom_histogram(mapping = aes(x = RevolvingUtilizationOfUnsecuredLines))
+```
+
+
+```{r}
+ggplot(datos_imputados_train) + 
+  geom_histogram(mapping = aes(x = RevolvingUtilizationOfUnsecuredLines)) +
+  coord_cartesian(ylim = c(0, 150))
+```
+
+```{r}
+ggplot(datos_imputados_train) + 
+  geom_histogram(mapping = aes(x = RevolvingUtilizationOfUnsecuredLines)) +
+  coord_cartesian(xlim = c(0, 10000),ylim=c(0,150))
+```
+
+
+```{r}
+datos_imputados_train %>% 
+filter(RevolvingUtilizationOfUnsecuredLines> 5000) %>% 
+        summary()
+```
+
+
+```{r}
+datos_imputados_limpios1 <- filter(datos_imputados_train,DebtRatio< 16000 & RevolvingUtilizationOfUnsecuredLines< 15000 & NumberOfTime60.89DaysPastDueNotWorse < 90)
+```
+
+
+```{r,include=FALSE}
+nrow(datos_imputados_limpios1)
+```
+
+
+```{r}
+data_training_limpio <- filter(data_training,DebtRatio< 16000 & RevolvingUtilizationOfUnsecuredLines< 15000 & NumberOfTime60.89DaysPastDueNotWorse < 90)
+#Filtros definitivos para eliminar datos atípicos
+```
+
+
+```{r,include=FALSE}
+nrow(data_training_limpio )
+```
+
+Number of dependents:
+
+Vemos la distribucion de la variable number of dependents para ver si tiene sentido hacer variables dummies sobre las mismas
+```{r}
+ggplot(datos_imputados_limpios1) + 
+  geom_histogram(mapping = aes(x = NumberOfDependents), binwidth = 1) +
+  coord_cartesian(ylim = c(0, 10000))
+```
+
+```{r}
+ggplot(datos_imputados_limpios1) + 
+  geom_histogram(mapping = aes(x = NumberOfDependents), binwidth = 1) +
+  coord_cartesian(ylim = c(0, 200))
+```
+
+```{r}
+datos_imputados_limpios1 %>% 
+        filter(NumberOfDependents == 0) %>% 
+        summary()
+```
+
+```{r}
+datos_imputados_limpios1 %>% 
+        filter(NumberOfDependents > 0 & NumberOfDependents < 6) %>% 
+        summary()
+```
+
+```{r}
+datos_imputados_limpios1 %>% 
+        filter(NumberOfDependents >5) %>% 
+        summary()
+```
+
+Comparando los valores que toman en las distintas variables aquellos que no tienen dependientes, aquellos que tienen entre 1 y 5, y aquellos que tienen mas de 5, observamos claras diferencias en general, pero especialmente en variables tan importantes como monthly income. Por tanto, crearemos 3 variables dummies que nos permitan agregar información a los individuos.
+
+```{r,include=FALSE}
+datos_imputados_limpios2 <-
+        datos_imputados_limpios1 %>% 
+        mutate(ZeroDependents = ifelse(NumberOfDependents==0,1,0),
+               oneto5Dependents = ifelse(NumberOfDependents>0 &NumberOfDependents<6 ,1,0),
+               plus5Dependents = ifelse(NumberOfDependents>5 ,1,0))
+        
+```
+
+```{r,include=FALSE}
+data_training_limpio2 <- 
+        data_training_limpio %>% 
+        mutate(ZeroDependents = ifelse(NumberOfDependents==0,1,0),
+               oneto5Dependents = ifelse(NumberOfDependents>0 &NumberOfDependents<6 ,1,0),
+               plus5Dependents = ifelse(NumberOfDependents>5 ,1,0))  
+        
+
+```
+
+```{r,include=FALSE}
+datos_imputados_limpios3 <-
+        datos_imputados_limpios2 %>% 
+         select(-c(NumberOfDependents))
+```
+
+
+Partimos la muestra de datos_imputados_limpios3 en train y test
+```{r,include=FALSE}
+smp_size<-floor(0.8*nrow(datos_imputados_limpios3)) #calculamos tamaño
+
+set.seed(123) #para hacer la particion reproducible
+train_ind_imputados_limpios<-sample(seq_len(nrow(datos_imputados_limpios3)), size=smp_size)
+
+train_datos_imputados_limpios<-datos_imputados_limpios3[train_ind_imputados_limpios,] #train
+test_datos_imputados_limpios<-datos_imputados_limpios3[-train_ind_imputados_limpios,] #test
+```
+
+```{r,,include=FALSE}
+data_training_limpio3 <-
+        data_training_limpio2 %>% 
+         select(-c(NumberOfDependents))
+```
+
+```{r,,include=FALSE}
+smp_size<-floor(0.8*nrow(data_training_limpio3)) #calculamos tamaño
+
+set.seed(123) #para hacer la particion reproducible
+train_ind_datos_limpios<-sample(seq_len(nrow(data_training_limpio3)), size=smp_size)
+
+train_datos_limpios<-data_training_limpio3[train_ind_datos_limpios,] #train
+test_datos_limpios<-data_training_limpio3[-train_ind_datos_limpios,] #test
+```
+
+```{r}
+train_imputacion2<-train_imputacion
+
+train_imputacion2$SeriousDlqin2yrs<-as.factor(paste(train_imputacion2$SeriousDlqin2yrs))
+
+```
+
+
+
+```{r}
+test_imputacion2<-test_imputacion
+
+test_imputacion2$SeriousDlqin2yrs<-as.factor(paste(test_imputacion2$SeriousDlqin2yrs))
+
+```
+
+
+
+#Modelos obtenidos
+
+```{r}
+resultadosKaggle<-read.csv("C:/Users/Manuel/Desktop/CUNEF/MACHINE LEARNING/give me some credit/ResultadosKaggle.csv", header = TRUE, sep = ",")
+```
+
+A lo largo del trabajo, hemos obtenido distintos modelos a partir de los tres algoritmos que hemos utilizado: GLM, Random Forest y XGBoost. 
+```{r}
+resultadosKaggle<-as.data.frame(resultadosKaggle)
+
+kable(resultadosKaggle)
+```
+
+Como podemos comprobar, los resultados son bastante buenos, destacando en general los obtenidos por el algoritmo Random Forest.
+
+En los siguientes apartados nos centraremos en describir el proceso de obtención del mejor modelo con cada algoritmo, así como los resultados obtenidos en un apartado final a modo de comparación.
+
+
+
+#MODELOS
+
+Una vez realizado el análisis exploratorio y descriptivo, nos disponemos a aplicar diferentes algoritmos sobre todos los datasets tratados. 
+
+Recordamos que la cuestión que nos atañe consiste en un problema de clasificación, en concreto de credit scoring. Tratamos de predecir la variable dicotómica que refleja la probabilidad de que alguien tenga dificultades financieras en los próximos 2 años, dadas 8 variables y ratios.
+
+Hemos decidido que los modelos a aplicar serán la Regresión Logística, Random Forest y XGBoost. También hemos realizado numerosas pruebas con Support Vector Machine (SVM), detalles que decidimos no incluir en el presente trabajo debido a la calidad de  los resultados que este algoritmo arrojaba en este caso en concreto.
+
+Comenzaremos con la Regresión Logística, con el objetivo de que los resultados mejoren con la posterior aplicación de los algoritmos Random Forest y el XGBoost.
+
+
+##Funciones
+
+Con el objetivo de facilitar el trabajo y hacer mas eficiente el código, creamos las siguientes funciones que utilizaremos para poder realizar la comparación de resultados entre modelos:
+
+Matriz de confusion
+```{r}
+matriz_confusion <- function(predicted_model,dataset){
+  confusion_matrix <- table(dataset$SeriousDlqin2yrs,predicted_model,dnn=c("Truth","Predicted"))
+  confusion_matrix  <- as.data.frame(confusion_matrix)
+  return(confusion_matrix)
+}
+```
+
+Tasa de error
+```{r}
+tasa_error <- function(confusion_matrix){
+  Verdadero_positivo <- confusion_matrix$Freq[1]
+  Falso_positivo <- confusion_matrix$Freq[2]
+  Falso_negativo <- confusion_matrix$Freq[3]
+  Verdadero_negativo <- confusion_matrix$Freq[4]
+  Total <- sum(confusion_matrix$Freq)
+
+Tasa_error <- (Falso_positivo+Falso_negativo)/Total
+aciertos_positivos <- Verdadero_positivo/(Verdadero_positivo + Falso_negativo)
+aciertos_negativos <- Verdadero_negativo/(Verdadero_negativo + Falso_positivo)
+
+return(list(Tasa_de_error= print(paste0("El porcentaje de error es de ",round(Tasa_error,3)))
+            ,Aciertos_positivos = print(paste0("El porcentaje de acierto positivo es de ",round(aciertos_positivos,3))),
+            Aciertos_negativos = print(paste0("El porcentaje de acierto negativo es de ",round(aciertos_negativos,3)))))
+}
+```
+
+Curva de Roc
+```{r}
+curva_roc <- function(dataset,probabilidades){
+  library(verification)
+  curva <- roc.plot(dataset$SeriousDlqin2yrs == 1, probabilidades)
+  print(curva)
+}
+```
+
+
+
+#GLM
+
+Para la regresión logística, el modelo óptimo que hemos encontrado ha sido entrenándolo con el dataset que hemos llamado “Imputación MICE limpio”.  Como ya hemos adelantado, en este caso principalmente se efectúa sobre el dataset original se ha llevado a cabo una imputación MICE por el método Predictive Mean Matching (PMM).
+El mejor GLM obtenido es el que utiliza los el dataset con el tratamiento imputación limpio (tratamiento 4), descrito en el primer apartado del trabajo, para entrenar el modelo. Al tratarse de una regresión logística fijamos la distribución binomial.
+En este mismo modelo también hemos empleado el algoritmo Stepwise en su modalidad Backward para seleccionar en base al AIC las variables que debía incluir nuestra regresión logística. El resultado ha sido que el mejor modelo era el que incluye las variables señaladas en negrita
+
+
+```{r}
+set.seed(123)
+modelGLM_train_datos_imputados_limpios <- step(glm(SeriousDlqin2yrs~., family = "binomial", data=train_datos_imputados_limpios),direction='backward')
+```
+
+```{r}
+summary(modelGLM_train_datos_imputados_limpios) 
+```
+
+```{r}
+#guardamos el modelo
+modelGLM_train_datos_imputados_limpios2<-glm(formula = SeriousDlqin2yrs ~ age + NumberOfTime30.59DaysPastDueNotWorse + 
+    DebtRatio + MonthlyIncome + NumberOfTimes90DaysLate + NumberRealEstateLoansOrLines + 
+    NumberOfTime60.89DaysPastDueNotWorse + ZeroDependents + oneto5Dependents + 
+    plus5Dependents, family = "binomial", data = train_datos_imputados_limpios)
+```
+
+
+```{r}
+modelGLM_train_datos_imputados_limpios2$coefficients
+```
+
+
+###Prediccion fuera de la muestra
+```{r}
+prob_outsample_modelGLM_train_datos_imputados_limpios <- predict(modelGLM_train_datos_imputados_limpios2, test_datos_imputados_limpios, type="response")
+
+predicted_modelGLM_train_datos_imputados_limpios_outsample <- predict(modelGLM_train_datos_imputados_limpios2, test_datos_imputados_limpios, type="response")>0.10
+predicted_modelGLM_train_datos_imputados_limpios_outsample <- as.numeric(predicted_modelGLM_train_datos_imputados_limpios_outsample)
+```
+
+
+Creamos la matriz de confusion:
+```{r}
+confusion_matrix_GLMimputacion_test <-matriz_confusion(predicted_model=predicted_modelGLM_train_datos_imputados_limpios_outsample,
+                                              dataset= test_datos_imputados_limpios)
+confusion_matrix_GLMimputacion_test
+```
+
+Tasa de error
+```{r}
+Tasa_de_error_glm_imputacion <- tasa_error(confusion_matrix= confusion_matrix_GLMimputacion_test)
+```
+
+
+Representación de la curva ROC
+```{r}
+curva_roc_train_datos_imputados_limpios <- curva_roc(dataset= test_datos_imputados_limpios,probabilidades = prob_outsample_modelGLM_train_datos_imputados_limpios )
+```
+
+
+
+#RANDOM FOREST
+
+Random forest es un algoritmo de tipo bagging que funciona como una combinación de árboles predictores tal que cada árbol depende de los valores de un vector aleatorio probado independientemente y con la misma distribución para cada uno de estos. Surge de los árboles de clasificación intentando remediar su inestabilidad.
+El mejor random forest obtenido utiliza los datos con el tratamiento básico limpio (tratamiento 3) descrito en el primer apartado del trabajo.
+Comprobamos que no va a haber problemas a la hora de ejecutar el algoritmo comprobando la correlación entre variables. Para ello ejecutamos la matriz de correlación y comprobamos que existe una alta correlación la variable NumberOfTime60-89DaysPastDueNotWorse y las homólogas para 30-59 días y más de 90 días. La eliminamos tras comprobar con cual mejora más el resultado. Así, a modo de ejemplo, nos quedaría la siguiente matriz de correlación:
+
+
+```{r, include=FALSE}
+train_datos_limpios_rf<-data_training
+```
+
+```{r, include=FALSE}
+str(train_datos_limpios_rf)
+```
+
+
+```{r, include=FALSE}
+train_datos_limpios_rf <- filter(train_datos_limpios_rf,DebtRatio< 16000 & RevolvingUtilizationOfUnsecuredLines< 15000 & NumberOfTime60.89DaysPastDueNotWorse < 90)
+```
+
+```{r, include=FALSE}
+train_datos_limpios_rf<-train_datos_limpios_rf[,-1]
+```
+
+```{r, include=FALSE}
+smp_size_rf<-floor(0.8*nrow(train_datos_limpios_rf)) #calculamos tamaño
+
+set.seed(123) #para hacer la particion reproducible
+train_ind_rf<-sample(seq_len(nrow(train_datos_limpios_rf)), size=smp_size_rf)
+
+train_limpio_rf<-train_datos_limpios_rf[train_ind_rf,] #train
+test_limpio_rf<-train_datos_limpios_rf[-train_ind_rf,] #test
+```
+
+
+```{r, include=FALSE}
+train_limpio_rf$SeriousDlqin2yrs<-as.factor(paste(train_limpio_rf$SeriousDlqin2yrs))
+test_limpio_rf$SeriousDlqin2yrs<-as.factor(paste(test_limpio_rf$SeriousDlqin2yrs))
+```
+
+```{r, include=FALSE}
+train_limpio_rf$SeriousDlqin2yrs<-as.numeric(paste(train_limpio_rf$SeriousDlqin2yrs))
+```
+
+Comprobamos que no va a haber problemas a la hora de ejecutar el algoritmo comprobando la correlación entre variables
+```{r}
+cor.mat = round(cor(train_limpio_rf[,-10],use="complete.obs"),2)
+```
+
+```{r}
+corrplot(cor.mat, type="lower", order="original", tl.col="black", tl.cex=0.7, tl.srt=45)
+```
+
+
+```{r, include=FALSE}
+train_limpio_rf$SeriousDlqin2yrs<-as.factor(paste(train_limpio_rf$SeriousDlqin2yrs))
+test_limpio_rf$SeriousDlqin2yrs<-as.factor(paste(test_limpio_rf$SeriousDlqin2yrs))
+```
+
+```{r}
+str(train_limpio_rf)
+```
+
+
+Con la función tuneRF obtenemos que el mejor número de variables tomadas al azar como candidatas en cada división, es decir las variables seleccionadas para distinguir cada nodo (parámetro mtry del algoritmo randomForest). En este caso, será mtry=4 como podemos observar.
+```{r, eval=FALSE}
+ bestmtry <- tuneRF(train_limpio_rf[,-10],train_limpio_rf$SeriousDlqin2yrs, ntreeTry=150, 
+    stepFactor=1.5,improve=0.01, trace=TRUE, plot=TRUE, dobest=FALSE)
+
+#con tune hemos comprobado que el mejor numero de predictores (mtry) es 4
+```
+
+```{r,eval=FALSE}
+str(train_limpio_rf)
+```
+
+
+##Modelo
+```{r}
+# Importance es para que nos devuelva tras estimar el modelo,
+# un vector con las variables ordenadas por su importancia y la contribucion al resultado final de cada una de las variables.
+rf_basic_limpio <-randomForest(SeriousDlqin2yrs~.,data=train_limpio_rf[,-10], mtry=4, ntree=500,     
+                        keep.forest=TRUE, sampsize=10000,importance=TRUE,test=test_limpio_rf[,-10])
+```
+
+```{r, include=FALSE}
+summary(rf_basic_limpio)
+```
+```{r}
+importance(rf_basic_limpio)
+varImpPlot(rf_basic_limpio)
+```
+En este sentido, observamos que las variables mas importantes de cara al resultado final son NumberOfTimes90DaysLate, RevolvingUtilizationOfUnsecuredLines, y DebtRatio.
+
+##Prediccion
+```{r}
+prob_outsample_modelRF_train_imputacion <- predict(rf_basic_limpio,type="prob",newdata=test_limpio_rf)[,2]
+
+predicted_modelRF_train_imputacion_outsample <- predict(rf_basic_limpio,type="prob",newdata=test_limpio_rf)[,2]>0.25
+```
+
+Matriz de confusion
+```{r}
+confusion_matrix_RFimputacion_test <- matriz_confusion(predicted_model=predicted_modelRF_train_imputacion_outsample ,
+                                              dataset= test_limpio_rf)
+confusion_matrix_RFimputacion_test 
+```
+
+Tasa de error
+```{r}
+RF_Tasa_de_error_imputacion_test <- tasa_error(confusion_matrix= confusion_matrix_RFimputacion_test )
+```
+
+
+Representación de la curva ROC
+```{r}
+RF_curva_imputacion_test  <- curva_roc(dataset= test_limpio_rf,
+                                  probabilidades = prob_outsample_modelRF_train_imputacion)
+```
+
+
+
+#XGBOOST
+
+El algoritmo XGBOOST consiste en la implementación del Gredient Boosting que consiste en un Gradient Descent hecho secuencialmente donde los modelos posteriores tratan de corregir los errores de los anteriores modelos. La filosofía detrás de este modelo sería ¿Puede una serie de ‘predictores débiles’ crear un único ‘predictor fuerte’ o fiable?
+En nuestro caso hemos obtenido buenos resultados al aplicar este algoritmo. El mejor XGBoost obtenido utiliza los datos con el tratamiento de imputación MICE (tratamiento 2) descrito en el primer apartado del trabajo. Pese a que este algoritmo puede tratar con NAs, nos ha resultado más efectivo seguir con los dataset creados.
+Hiperparámetros que hemos obtenido usando Cross Validation:
+Max_depth -> Máxima profundidad de los árboles. Hemos comprobado que un número pequeño, en concreto el dos, nos arrojaba mejores resultados, probablemente al controlar el overfitting.
+
+```{r, include=FALSE}
+XGB_imputacion_train<-as.matrix(train_imputacion2[,-1])
+XGB_imputacion_test<-as.matrix(train_imputacion2[,-1])
+```
+
+```{r, include=FALSE}
+
+# Create sparse matrixes and perform One-Hot Encoding to create dummy variables
+XGB_imputacion_train2 <- sparse.model.matrix(SeriousDlqin2yrs ~ .-1, data=train_imputacion2)
+XGB_imputacion_test2  <- sparse.model.matrix(SeriousDlqin2yrs ~ .-1, data=test_imputacion2)
+```
+
+```{r, include=FALSE}
+imputacion_train_label<-train_imputacion2$SeriousDlqin2yrs
+imputacion_train_label <- as.numeric(paste(imputacion_train_label))
+
+imputacion_test_label<-test_imputacion2$SeriousDlqin2yrs
+imputacion_test_label <- as.numeric(paste(imputacion_test_label))
+```
+
+
+```{r}
+XGB_imputacion <- xgboost(data = XGB_imputacion_train, label=imputacion_train_label, max_depth = 2, eta = 1, nthread = 3, nrounds = 2, objective = "binary:logistic")
+
+```
+
+
+```{r}
+prob_outsample_modelXGB_train_imputacion <- predict(XGB_imputacion ,XGB_imputacion_test2)
+
+predicted_modelXGB_train_imputacion_outsample <- predict(XGB_imputacion ,XGB_imputacion_test2)>0.2
+```
+
+
+Matriz de confusion
+```{r}
+confusion_matrix_imputacion_XGB_test <- matriz_confusion(predicted_model= predicted_modelXGB_train_imputacion ,dataset= test_imputacion2)
+confusion_matrix_imputacion_XGB_test 
+```
+
+
+Tasa de error
+```{r}
+XGB_Tasa_de_error_imputacion_test <- tasa_error(confusion_matrix= confusion_matrix_imputacion_XGB_test)
+```
+
+
+Representación de la curva ROC
+```{r}
+XGB_curva_imputacion_test  <- curva_roc(dataset= test_imputacion2,
+                                  probabilidades = prob_outsample_modelXGB_train_imputacion)
+```
+
+
+
+##Comparativa curvas de ROC:
+
+En este apartado compararemos las tres curvas ROC obtenidas de los tres mejores modelos e interpretaremos los resultados. Para ello, generaremos las tres curvas anteriormente presentadas en el mismo gráfico, de forma que podamos observar la diferencia entre las áreas que hay bajo cada una de ellas.
+
+```{r}
+function(dataset,probabilidades){
+  library(verification)
+  curva <- roc.plot(dataset$SeriousDlqin2yrs == 1, probabilidades)
+  print(curva)
+}
+
+```
+
+
+```{r}
+library(ROCR)
+data(ROCR.simple)
+GLM_pred <- prediction(prob_outsample_modelGLM_train_datos_imputados_limpios,test_datos_imputados_limpios$SeriousDlqin2yrs)
+RF_pred <- prediction(prob_outsample_modelRF_train_imputacion,test_limpio_rf$SeriousDlqin2yrs)
+XGB_pred <- prediction(prob_outsample_modelXGB_train_imputacion,test_imputacion2$SeriousDlqin2yrs)
+GLM_perf <- performance(GLM_pred, "tpr", "fpr" )
+RF_perf <- performance(RF_pred, "tpr", "fpr")
+XGB_perf <- performance(XGB_pred, "tpr", "fpr")
+plot(XGB_perf, col = "red",lty= 1)
+plot(RF_perf, add = TRUE, col = "blue",lty=1)
+plot(GLM_perf, add = TRUE, col = "black",lty=1)
+legend("bottomright",legend= c("xgboost","rf","glm"),col=c("red","blue","black"),lty=1,cex = 1)
+```
+
+En primer lugar, es necesario definir los ejes de la curva y qué se está representando:
+
+•	True positive ratio: ratio de verdaderos positivos, es decir, número de individuos que han tienen han cometido impago en 2 años (seriousdeliquencyin2years) y han sido correctamente predichos
+•	False positive ratio: ratio de falsos positivos, es decir, individuos que no han cometido impago en 2 años y el algoritmo los clasifica como si hubieran cometido incumplimiento.
+
+En este sentido, la curva de ROC relaciona la tasa de aciertos positivos con los errores positivos, es decir, nos indica como para tener una mayor tasa de acierto tenemos que cometer más errores en la clasificación de individuos como negativos, En otras palabras, tendríamos que clasificar a más individuos como incumplidores a dos años cuando realmente no lo son. Podemos ver que el área debajo de la curva que genera el random forest es la mas grande, del mismo modo que es el modelo que arroja una precisión mayor.
+
+Concluimos que, como se puede apreciar gráficamente, hasta un ratio de errores positivos de 10% los tres algoritmos se comportan igual: habría una tasa de acierto cercana al 60%. Si quisiéramos aumentar la tasa de aciertos cometiendo la menor cantidad de errores positivos, el algoritmo que mejor resultados ofrece es Random Forest, seguido de Xgboost y GLM. Desde un 60% a un 80% de aciertos la diferencia entre algoritmos es mayor. Sin embargo, conforme queremos aumentar la tasa de aciertos positivos la diferencia entre los algoritmos cada vez es más pequeña y el número de errores positivos que cometemos cada vez es más alto.
+

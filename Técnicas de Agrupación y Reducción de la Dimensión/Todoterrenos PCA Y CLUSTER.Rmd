@@ -1,0 +1,1411 @@
+---
+title: "Todoterrenos con cluster"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Índice:
+
+0. Resumen ejecutivo
+1. Objetivos
+2. Metodología empleada
+ 2.1. Análisis exploratorio datos
+   2.1.1. Variables numéricas
+   2.1.2. Variables nominales
+  2.2. Imputación de valores a los NA
+   2.2.1. Análisis de los NA
+  2.2.2. Imputación de valores
+    2.2.2.1. Primer método: MICE
+    2.2.2.2. Segundo método: Missforest
+    2.2.2.3. Elección del método de imputación
+  2.3. Pertinencia de realizar el análisis factorial
+   2.3.1. Análisis de la matriz de correlaciones
+   2.3.2. Test de esfericidad de Barlett
+   2.3.3. KMO Global
+   2.3.4. KMO Parcial
+  2.4. Resultados quitando las variables plazas y rpm
+   2.4.1. Diferencias imputación
+   2.4.2. Matriz de correlación
+   2.4.3. KMO
+   2.4.3. MSA
+  2.5. Análisis factorial
+   2.5.1. Método componentes principales (PCA)
+    2.5.1.1. Contribución CCPP en las explicaciones de las variables
+    2.5.1.2. Contribución de las variables a los CCPP
+    2.5.1.3. Matriz de componentes no rotados
+  2.6. Rotaciones factoriales
+   2.6.1. Rotación varimax
+   2.6.2. Rotación oblimin
+  2.7 Metodo del factor principal
+3. Análisis cluster
+  3.1. ¿Tiene sentido realizar el análisis cluster?
+   3.1.1. Evaluación de la bondad del análisis cluster
+  3.2. Identificación del número de grupos
+  3.3. Aplicación del algoritmo K-means
+  3.4. Interpretación de los grupos
+4. Conclusiones
+5. Bibliografía
+6. Anexo: código
+
+#0. Resumen ejecutivo
+
+
+#1. Objetivos
+
+El objetivo principal de este informe es conocer las características fundamentales de los todo terreno a partir de una base de datos de todo terrenos a la venta en España hace unos años. De acuerdo con el principio de parsimonia intentaremos explicar las características de este tipo de vehículos con el menor número posible de variables explicativas. Para ello realizaremos un analisis factorial en caso de sea posible realizar este tipo de analisis.
+
+Como objetivo secundario pretendemos agrupar a los todo terrenos en grupos con características homogeneas o similares mediante las técnicas de análisis cluster estudiadas.
+
+
+#2. Metodología empleada
+
+##2.1. Análisis exploratorio de datos.
+
+Tras proceder a importar los datos, observamos la composicion del dataset, con el objetivo de ver que datos tenemos, de que tipo son y comprobar la existencia de NA.
+
+Procedemos a visualizar la estructura del Dataset.
+```{r, include=FALSE,cache=TRUE}
+library(foreign) #Cargamos la libreria foreign para importar el fichero de tipo sav
+dataset = read.spss("C:/Users/Manuel/Desktop/CUNEF/Técnicas Agrupacion y Reduccion/Practica TODOTERRENOS/tterreno_euro.sav", to.data.frame=TRUE)
+dataset$plazas <- as.numeric(paste(dataset$plazas))
+dataset$cilindro <- as.numeric(paste(dataset$cilindro))
+```
+
+```{r,include=FALSE}
+if(nrow(unique(dataset))== nrow(dataset)){
+  print("No hay duplicados")
+}
+```
+
+```{r,include=FALSE}
+str(dataset)
+```
+
+El dataset cuenta con 15 variables, 12 númericas y 3 de tipo nominal.
+
+####2.1.1. Variables numéricas:
+
+- **PVP euro**: Precio en euros del coche
+
+```{r,echo=FALSE}
+summary(dataset$pvp_euro)
+```
+
+La mitad de los todo terrenos tienen un precio igual o inferior a 25.000 euros, solo un 25% de los todoterrenos tienen un precio superior a los 31.200 euros con un máximo en 69.461 euros.
+
+- **Número Cilindros**
+
+A continuacion mostramos una tabla con la distribución de la variable número de cilindros
+```{r,echo=FALSE}
+library(plyr)
+numero_cilindros <- count(dataset$cilindro)
+numero_cilindros[,"freq relativa"] <- numero_cilindros$freq/sum(numero_cilindros$freq)
+frecuencias_acumuladas <- NULL
+for (i in 1:nrow(numero_cilindros)){
+  frecuencias_acumuladas <- c(frecuencias_acumuladas,sum(numero_cilindros$`freq relativa`[1:i]))
+}
+numero_cilindros[,"frecuencia_acumulada"] <- frecuencias_acumuladas
+numero_cilindros
+```
+
+
+```{r}
+numero_marcas<-count(dataset$marca)
+numero_marcas[, "frecuencia.relativa"]<-numero_marcas$freq/sum(numero_marcas$freq)
+frecuencias_acumuladasS<-NULL
+for (i in 1:nrow(numero_marcas)){
+        frecuencias_acumuladasS<-c(frecuencias_acumuladasS,sum(numero_marcas$frecuencia.relativa[1:i]))
+}
+numero_marcas[,"frecuencia_acumulada"]<-frecuencias_acumuladasS
+```
+
+
+
+
+
+La variable cilindros solo toma 3 valores en el dataset (4, 6 y 8 cilindros). Un 72,8% de los todoterreno tienen sólo 4 cilindros, un 25% tiene 6 cilindros y solo un 2% de los mismos tienen 8 cilindros.
+
+- **cc**: Cilindrada en cm cubicos
+
+```{r,echo=FALSE}
+summary(dataset$cc)
+```
+
+La mitad de los todo terrenos tienen menos de 2.500 centrímetros cúbicos, sólo un 25% de los todoterrenos tienen más de 2850 centrímetros cubicos con un máximo en 5216 centrímetros cúbicos.
+
+- **Potencia**: medida en número de caballos (cv)
+
+```{r,echo=FALSE}
+summary(dataset$potencia)
+```
+
+La mitad de los todo terreno tienen 112 caballos, y solo un 25% tienen más de 125, con un maximo de 225 caballos. Por tanto podemos ver como la dispersion en cuarto cuartil es muy grande con respecto al resto de cuartiles (la diferencia entre el primer cuartil y la mediana es 27 caballos frente a los 100 caballos de dispersion entre el tercer cuartil y el máximo).
+
+- **RPM**: Revoluciones por minuto
+
+A continuacion mostramos una tabla y un histograma con la distribucion en intervalos de las revoluciones por minuto (en miles).
+
+```{r,echo=FALSE}
+intervalos <- seq(from=3.6, to=6.8, by=0.4)
+rpm_cut <- cut(dataset$rpm/1000,intervalos, right=FALSE)
+rpm_freq <- table(rpm_cut)
+rpm_freq <- as.data.frame(rpm_freq)
+rpm_freq[,"frecuencia_relativa"] <- rpm_freq$Freq/sum(rpm_freq$Freq)
+frecuencias_acumuladas <- NULL
+for (i in 1:nrow(rpm_freq)){
+  frecuencias_acumuladas <- c(frecuencias_acumuladas,sum(rpm_freq$frecuencia_relativa[1:i]))
+}
+rpm_freq[,"frecuencia_acumulada"] <- frecuencias_acumuladas
+print(rpm_freq,row.names = FALSE)
+```
+
+```{r}
+summary(dataset$cons90)
+```
+
+
+```{r}
+intervals <- seq(from=6.6, to=13.7, by=2)
+cons90_cut<-cut(dataset$cons90, intervals, right=FALSE)
+cons90_freq<-table(cons90_cut)
+cons90_freq<-as.data.frame(cons90_freq)
+cons90_freq[,"frecuencia.relativa"]<-cons90_freq$Freq/sum(cons90_freq$Freq)
+frecuencias_acumulaitas<-NULL
+for (i in 1:nrow(cons90_freq)){
+        frecuencias_acumulaitas<-c(frecuencias_acumulaitas, sum(cons90_freq$frecuencia.relativa[1:i]))
+}
+cons90_freq[,"frecuencia_acumulada"]<-frecuencias_acumulaitas
+
+```
+
+
+
+
+
+
+De acuerdo con la tabla un 63,2% de los todo terrenos tienen entre 3.6 y 4.8 mil revoluciones por minuto, estado un 55% del total entre 4 y 4.8.
+
+Hasta 5.6 miles de revoluciones hay un 86,4% del total de todos terrenos, estando un 20,8% de las observaciones en el intervalo de 5.2 a 5.6 miles de revoluciones. El 13,4% restante se encuentra en los intervalos de 5.6 a 6.8 miles de revoluciones.
+
+```{r,include=FALSE}
+z <- na.omit(dataset$rpm)
+hist(z,freq=FALSE,breaks=8,
+     xlab="rpm",
+     main="Distribucion rpm")
+curve(dnorm(x, mean=mean(z), sd=sd(z)),
+        add=TRUE, col="blue", lwd=2)
+lines(density(z)$x, density(z)$y,
+        col="red", lwd=2, lty=2)
+```
+
+
+- **Peso**: Peso en kg
+
+```{r,echo=FALSE}
+summary(dataset$peso)
+```
+
+La mitad de los todo terrenos tienen un peso igual o inferior a 1.750 kilos, teniendo solo un 25% de los todoterrenos mas de 1.909 kilos con un máximo de 2320 kilos.
+
+- **Plazas**: Número de plazas
+
+La distribución del número de plazas es la siguiente:
+
+```{r,echo=FALSE}
+library(plyr)
+numero_plazas <- count(dataset$plazas)
+numero_plazas[,"freq relativa"] <- numero_plazas$freq/sum(numero_plazas$freq)
+frecuencias_acumuladas <- NULL
+for (i in 1:nrow(numero_plazas)){
+  frecuencias_acumuladas <- c(frecuencias_acumuladas,sum(numero_plazas$`freq relativa`[1:i]))
+}
+numero_plazas[,"frecuencia_acumulada"] <- frecuencias_acumuladas
+numero_plazas
+```
+
+Cerca de la mitad de los todo terreno del dataset (un 48,8%) tienen 5 plazas, habiendo solo un 25% del total con mas de plazas. 
+
+De los todo terreno que tienen mas de 5 plazas, la mayoría tienen 7 plazas, habiendo solo varios de 6,8 y 9 plazas. En cuanto a los todo terreno que tienen menos de 5 plazas, la mayoría tienen 4 plazas (un 21,6% del total).
+
+- **Cons90**: Consumo 90 km/h
+
+A continuacion mostramos una tabla y un histograma con la distribucion en intervalos del consumo a 90 km por hora.
+
+```{r,echo=FALSE}
+breaksc90 <- seq(from=6.60,to= 14.10,by = 1.5) 
+consumo90_cut <- cut(dataset$cons90,breaksc90, right=FALSE)
+consumo90_freq <- table(consumo90_cut)
+consumo90_freq <- as.data.frame(consumo90_freq)
+consumo90_freq[,"frecuencia_relativa"] <- consumo90_freq$Freq/sum(consumo90_freq$Freq)
+frecuencias_acumuladas <- NULL
+for (i in 1:nrow(consumo90_freq)){
+  frecuencias_acumuladas <- c(frecuencias_acumuladas,sum(consumo90_freq$frecuencia_relativa[1:i]))
+}
+consumo90_freq[,"frecuencia_acumulada"] <- frecuencias_acumuladas
+print(consumo90_freq,row.names = FALSE)
+```
+
+De acuerdo con el dataset a una velocidad de 90 km/h, 7 de cada 10 todo terrenos tiene un nivel consumo de bajo a medio y 2 de consumo alto y 1 de consumo muy alto. 
+
+```{r,include=FALSE}
+z <- na.omit(dataset$cons90)
+hist(z,freq=FALSE,breaks=8,
+     xlab="Litros",
+     main="Distribucion Consumo a 90km/h")
+curve(dnorm(x, mean=mean(z), sd=sd(z)),
+        add=TRUE, col="blue", lwd=2)
+lines(density(z)$x, density(z)$y,
+        col="red", lwd=2, lty=2)
+```
+
+
+- **Cons120**: Consumo 120 km/h
+
+A continuacion mostramos una tabla y un histograma con la distribucion en intervalos del consumo a 90 km por hora.
+
+```{r,echo=FALSE}
+breaksc120 <- seq(from=8.40,to= 18.40,by = 2) 
+consumo120_cut <- cut(dataset$cons120,breaksc120, right=FALSE)
+consumo120_freq <- table(consumo120_cut)
+consumo120_freq <- as.data.frame(consumo120_freq)
+consumo120_freq[,"frecuencia_relativa"] <- consumo120_freq$Freq/sum(consumo120_freq$Freq)
+frecuencias_acumuladas <- NULL
+for (i in 1:nrow(consumo120_freq)){
+  frecuencias_acumuladas <- c(frecuencias_acumuladas,sum(consumo120_freq$frecuencia_relativa[1:i]))
+}
+consumo120_freq[,"frecuencia_acumulada"] <- frecuencias_acumuladas
+print(consumo120_freq,row.names = FALSE)
+```
+
+De acuerdo con el dataset a una velocidad de 120 km/h, aproximadamente 6 de cada 10 de los todo terrenos tiene un nivel consumo de entre 8.4 y 12.4 litros, 3 un consumo de entre 12.4 y 15 litros y 1 con un consumo superior a 15 litros. 
+
+```{r,include=FALSE}
+z <- na.omit(dataset$cons120)
+hist(z,freq=FALSE,breaks=8,
+     xlab="Litros",
+     main="Distribucion Consumo a 120km/h")
+curve(dnorm(x, mean=mean(z), sd=sd(z)),
+        add=TRUE, col="blue", lwd=2)
+lines(density(z)$x, density(z)$y,
+        col="red", lwd=2, lty=2)
+```
+
+
+- **Consurb**: Consumo urbano
+
+A continuacion mostramos un histograma con los datos de consumo urbano de los todo terreno:
+
+```{r,echo=FALSE}
+z <- na.omit(dataset$consurb)
+hist(z,freq=FALSE,breaks=8,
+     xlab="Litros",
+     main="Distribucion Consumo urbano")
+curve(dnorm(x, mean=mean(z), sd=sd(z)),
+        add=TRUE, col="blue", lwd=2)
+lines(density(z)$x, density(z)$y,
+        col="red", lwd=2, lty=2)
+```
+
+De acuerdo con el histograma, la gran mayoria de los todoterreno tienen un consumo urbano inferior a 15 litros, siendo el porcentaje de todo terrenos con consumos superiores a los 15 litros muy bajo. La mayor acumulación de coches se e cuentra en el intervalo de entre 10 y 14 litros. 
+
+
+
+- **Velocidad**: Velocidad máxima
+
+A continuacion mostramos un histograma con los datos de consumo urbano de los todo terreno:
+
+```{r,echo=FALSE}
+breaksvelocidad <- seq(from=120,to= 200,by = 10) 
+velocidad_cut <- cut(dataset$velocida,breaksvelocidad, right=FALSE)
+velocidad_freq <- table(velocidad_cut)
+velocidad_freq <- as.data.frame(velocidad_freq)
+velocidad_freq[,"frecuencia_relativa"] <- velocidad_freq$Freq/sum(velocidad_freq$Freq)
+frecuencias_acumuladas <- NULL
+for (i in 1:nrow(velocidad_freq)){
+  frecuencias_acumuladas <- c(frecuencias_acumuladas,sum(velocidad_freq$frecuencia_relativa[1:i]))
+}
+velocidad_freq[,"frecuencia_acumulada"] <- frecuencias_acumuladas
+print(velocidad_freq,row.names = FALSE)
+```
+
+- 2/3 de los todo terrenos tienen una velocidad máxima inferior a 160 km/h, estando aproximadamente un 1/3 del total en el intervalode 140 a 150 km por hora. 
+- Del 1/3 restante, la mayoría de los todo terrenos se encuentran en el intervalode 160 a 180 km hora. Solo un 6% tienen velocidades superiores a los 180 km por hora.
+
+```{r,include=FALSE}
+z <- na.omit(dataset$velocida)
+hist(z,freq=FALSE,breaks=8,
+     xlab="Km/hora",
+     main="Distribucion Velocidad")
+curve(dnorm(x, mean=mean(z), sd=sd(z)),
+        add=TRUE, col="blue", lwd=2)
+lines(density(z)$x, density(z)$y,
+        col="red", lwd=2, lty=2)
+```
+
+
+- **Aceleracion**: Tiempo de aceleración de 0 a 10
+
+A continuacion mostramos un histograma con los tiempos de aceleracion de los todo terreno:
+
+
+```{r,echo=FALSE}
+z <- na.omit(dataset$acelerac)
+hist(z,freq=FALSE,breaks=8,
+     xlab="Segundos",
+     main="Distribucion Aceleración")
+lines(density(z)$x, density(z)$y,
+        col="red", lwd=2, lty=2)
+```
+
+Como se puede apreciar la distribucion de esta variable es bastante unifome. Salvo para los casos mas extremos (tiempos inferiores a 10 segundos o superiores a 20 segundos).
+
+####2.1.2. Variables nominales:
+
+- **Marca**: son las marcas de los distintos todo terrenos. 
+
+Mostramos en una tabla las marcas con mas y menos coches del Dataset:
+
+```{r,echo=FALSE}
+Marca <- summary.factor(dataset$marca)
+Marca <- as.matrix(Marca,ncol=2)
+Marca <- as.data.frame(Marca)
+Marca[,"Nombre"] <- rownames(Marca)
+rownames(Marca) <- NULL
+Marca <- Marca[order(-Marca$V1),]
+Marca2 <- as.data.frame(cbind(Marca$Nombre,Marca$V1))
+head(Marca2)
+tail(Marca2)
+```
+
+Las marcas con mas todoterrenos son: Nissan, Suzuki, Landrover, Mitsubishi y Jeep.
+Las marcas con menos: Daihatsu, Chevrolet, Tata, Lada y Kia.
+
+- **Modelo**: son los distintos modelos de las marcas.
+
+En primer lugar analizamos si hay modelos duplicados.
+```{r,echo=FALSE}
+numero_modelos <- count(dataset$modelo)
+count_modelos <- NULL
+for (i in 1:nrow(dataset)){
+      count_modelos <- c(count_modelos,numero_modelos[dataset$modelo[i],2])
+}
+dataset[,"Numero_modelos"] <- count_modelos
+modelos_repetidos <- data.frame(dataset$modelo)
+modelos_repetidos <- cbind(modelos_repetidos,count_modelos)
+colnames(modelos_repetidos) <- c("modelo","numero_de_veces")
+unique(modelos_repetidos[modelos_repetidos$numero_de_veces>1,])
+```
+
+Hay 13 modelos que aparecen mas de dos veces en el dataset. 12 que aparecen 2 veces y uno que aparece 3.
+```{r,include=FALSE}
+library(dplyr)
+```
+
+```{r,include=FALSE}
+dataset_duplicados <- dataset[dataset$Numero_modelos>1,]
+
+tabla_diferencias <- dataset_duplicados %>%
+  group_by(modelo) %>%
+  summarise(Diferencias_precio= round(max(pvp_euro)-min(pvp_euro),2),
+            Diferencias_plazas= round(max(plazas)-min(plazas),2),
+            Diferencias_consumo_120 = round(max(cons120)-min(cons120),2)) %>%
+  arrange(desc(Diferencias_precio))
+tablas_diferencias <- as.data.frame(tabla_diferencias)
+print(tabla_diferencias)
+```
+
+Hemos calculado las diferencias de precio para los modelos repetidos como la diferencia entre el precio maximo y el precio minimo y hemos comprobado como para todos los modelos hay diferencias de precio. En la mitad de modelos tambien hay diferencias en cuanto al numero de asientos, es decir, son un mismo tipo de coche pero con la opcion de tener 2 plazas mas. En otros casos se puede observar un aumento de peso del vehículo, con el respectivo aumento del consumo.
+
+Las diferencias de precio entre coches de un mismo modelo, con las mismas características de potencia, cilindrada, y numero de cilindros se debe fundamentalmente a los extras que suelen incorporar los coches y que no estan incluidos en la base de datos, como son: tapicería de cuero, equipos de sonido, faros, aparcamiento asistido, arranque sin llave, entre otros.
+
+
+```{r, include=FALSE}
+cor.mat = round(cor(dataset[,c(-1,-2,-15,-16)], use="complete.obs"),2) 
+cor.mat
+```
+
+
+##2.2 Imputación de valores a los NAs
+
+###2.2.1. Análisis de los NA
+
+En este apartado vamos a analizar la distribucion de los NAs en el Dataset para posteriormente eliminar las observaciones o imputar valores.
+```{r, echo=FALSE,include=FALSE}
+require(mice)
+library(VIM)
+```
+
+Visualizamos la distribucion de los NA en las variables
+
+```{r, echo=FALSE}
+mice_plot <- aggr(dataset[,-16], col=c('navyblue','yellow'),
+                    numbers=TRUE, sortVars=TRUE,
+                    labels=names(dataset), cex.axis=.7,
+                    gap=3, ylab=c("Missing data","Pattern"))
+```
+Análisis del grafico missing Data:
+
+La variable acelerac, tiene 46 NA, un 36% sobre el total de las observaciones. Existe otra variable que aporta informacion sobre la aceleracion pero realmente no aporta mucha informacion puesto que es una variable categorica que solo distingue entre aquellos todoterrenos que aceleran de 0 a 100 en menos de 10 segundos de aquellos que no, siendo solo 3 los que aceleran de 0 a 100 en menos de 10 segundos. Asi, no voy a considerar la opcion de eliminar la variable acelerac puesto que podria perderse informacion valiosa. 
+
+Del resto de variables las que mas datos perdidos tienen son consumo 120, consumo90 y consumo urbano con entre un 12 y un 5% de missing values. Las variables velocidad y peso tienen un porcentaje de Na muy pequeño.
+
+En terminos globales del dataset:
+
+- En un 60,80% de los casos no hay NAs.
+- En un 22,40% de los casos solo hay NAs en la variable aceleracion
+- En un 4% de los casos hay NAS para las variables aceleracion, consumo 120, consumo 90 y tambien 4% para estas variables y el consumo urbano, o lo que es lo mismo, un 8% de las observaciones tienen 3 o mas NAs. Estos son los casos mas problematicos pues habria que estimar 3 o 4 valores distintos que imputar a partir de los valores del resto de variables.
+- Un 3,2% de las observaciones con 2 NAs (aceleracion y consumo 120)
+- Un 2,4% de las observaciones con 2 NAs (aceleracion y consumo urbano)
+- Un 1,6% de las observaciones con NAs en la variable peso
+
+Procedemos a eliminar del Dataset los todo terrenos con 3 y 4 valores en NA, sería un total de 10 observaciones (un 8% del total), ya que los distintos algoritmos de imputación de valores que vamos a utilizar tendrían que hacer muchas suposiciones lo que aumentaría el error de imputación significativamente.
+
+
+
+###2.2.2. Imputacion de valores
+
+```{r, echo=FALSE}
+dataset_mod <- dataset[!(is.na(dataset$acelerac)&is.na(dataset$cons120)&is.na(dataset$cons90)),]
+```
+
+Vamos a imputar valores a los NAs de las variables aceleración, consumo urbano, velocidad y peso mediante dos métodos distintos. Em ambos metodos procederemos de la siguiente manera:
+
+Dejaremos fuera  las variables categoricas: marca, modelo, acel2(tiempo de aceleracion).
+
+####2.2.2.1. Primer método: MICE
+
+MICE, *Multivariate Imputation by chained equations*, asume que los datos faltantes son Desaparecidos al azar (MAR - missing at random), lo que significa que la probabilidad de que falte un valor depende solo del valor observado y se puede predecir.Por defecto usa la regresión lineal para predecir valores perdidos continuos y la logistica se usa para valores categoricos faltantes. Una vez que se completa este ciclo, se generan multiples conjuntos de datos (*Tutorial on 5 Powerful R Packages used for imputing missing values, 2016*). Estos conjuntos de datos difieren solo en los valores perdidos imputados y los juntaremos realizando el promedio. 
+
+
+```{r, include=FALSE,cache=TRUE}
+imputed_Data <- mice(dataset_mod[,c(-1,-2,-15,-16)], m=5, maxit = 50, method = 'pmm', seed = 123)
+```
+
+```{r, include=FALSE}
+require(lattice)
+```
+
+```{r, echo=FALSE}
+imp_tot2 <- complete(imputed_Data, "long", inc = TRUE)
+head(imp_tot2)
+col <- rep(c("blue", "red")[1 + as.numeric(is.na(imputed_Data$data$acelerac))], 6)
+stripplot(acelerac ~ .imp, data = imp_tot2, jit = TRUE, col = col, xlab = "imputation Number")
+```
+
+Este grafico nos muestra la imputación de valores para variable aceleración que es la mas NA tiene en los distintos dataset que genera la función mice. Los valores observados están en azul y los imputados en rojo, como se puede apreciar graficamente la distribucion de la imputacion es muy similar.
+
+Por ello la imputacion de valores mediante esta función será igual a la media de los resultados de los distintos datasets.
+```{r, echo=FALSE}
+completeData1 <- complete(imputed_Data,1)
+completeData2 <- complete(imputed_Data,2)
+completeData3 <- complete(imputed_Data,3)
+completeData4 <- complete(imputed_Data,4)
+completeData5 <- complete(imputed_Data,5)
+CompleteData <- (completeData1 + completeData2 + completeData3 + completeData4 + completeData5)/5
+```
+
+```{r, include=FALSE}
+cor.mat2 = round(cor(CompleteData),2) 
+```
+
+####2.2.2.2. Segundo método: Missforest
+
+MissForest es una implementación de algoritmo random forest. Es un método de imputación no paramétrico aplicable a varios tipos de variables. El método no paramétrico no hace suposiciones explícitas sobre la forma funcional de f (cualquier función arbitraria). En cambio, trata de estimar f de modo que pueda estar lo más cerca posible de los puntos de datos sin parecer poco práctico. Asi, el algoritmo construye un modelo random forest para cada variable. Luego utiliza el modelo para predecir valores perdidos en la variable con la ayuda de los valores observados (*Tutorial on 5 Powerful R Packages used for imputing missing values, 2016*).
+
+```{r, include=FALSE}
+library(missForest)
+```
+
+
+```{r,include=FALSE,cache=TRUE}
+imputed_data_rf <- missForest(dataset_mod[,c(-1,-2,-15,-16)])
+imputed_data_rf$OOBerror
+```
+
+NRMSE - *normalized mean squared error* - es el error cuadrático medio normalizado. Nos sugiere que el error de imputacion es de de un 0,37%. 
+
+```{r,echo=FALSE}
+completedata_rf <- imputed_data_rf$ximp
+cor.mat3 = round(cor(completedata_rf),2)
+```
+
+####2.2.2.3. Eleccion del método de imputación
+
+Para elegir el método más preciso vamos a analizar la diferencia entre la matriz de correlaciones de las observaciones iniciales completas con la obtenida por ambos métodos: 
+
+- Diferencias de la imputacion mediante paquete mice funcion PMM
+```{r, echo=FALSE}
+diferencia_mice <- cor.mat - cor.mat2 
+```
+
+Calculamos el % de variacion entre la matriz inicial y la obtenida por el metodo mice.
+```{r, echo=FALSE}
+flattenCorrMatrix <- function(cormat) {
+  ut <- upper.tri(cormat)
+  data.frame(
+    row = rownames(cormat)[row(cormat)[ut]],
+    column = rownames(cormat)[col(cormat)[ut]],
+    cor  =(cormat)[ut]
+    )
+}
+diferencia_mice_flat <- flattenCorrMatrix(diferencia_mice)
+error_mice1 <- round(sum(abs(diferencia_mice_flat$cor))/nrow(diferencia_mice_flat),3)
+error_mice1
+```
+
+
+- Diferencias imputación mediante paquete missForest mediante random forest
+```{r,echo=FALSE}
+diferencia_rf <- cor.mat- cor.mat3
+```
+
+Calculamos el % de variacion entre la matriz inicial y la obtenida por el metodo missForest.
+```{r,echo=FALSE}
+diferencia_rf_flat <- flattenCorrMatrix(diferencia_rf)
+error_rf1 <- round(sum(abs(diferencia_rf_flat$cor))/nrow(diferencia_rf_flat),3)
+error_rf1
+```
+
+Como se puede comprobar la diferencia de la matriz de correlaciones mediante el random forest es de un 8.4% frente al 9.5% del pmm, ambas son pequeñas. Elegiremos la imputacion de valores realizada por el metodo de random forest puesto que demuestra ser mas preciso.
+
+##2.3. Pertinencia de realizar el análisis factorial.
+
+Para analizar la pertinencia del analisis debemos examinar que se cumplan los criterios de colinealidad y multicolinealidad entre las variables que se introducirán al modelo.
+
+Para ello vamos a examinar la matriz de correlaciones y a calcular distintos indicadores (test esferescidad de barlett, kmo global, kmo parcial)
+
+###2.3.1. Análisis de la matriz de correlaciones
+
+Se determinaran las posibles asociaciones o interrelaciones existentes entre todas las variables
+estudiadas, a partir de la matriz de observaciones. Cuando se haya determinado tal matriz conviene estudiarla de cara a comprobar si sus caracteristicas son adecuadas o no para llevar a cabo el analisis. En el caso que nos ocupa, seria importante que las variables analizadas esten fuertemente asociadas.
+
+```{r,include=FALSE}
+require(Hmisc)
+```
+
+
+```{r, echo=FALSE}
+cor.mat.nds= rcorr(as.matrix(completedata_rf))
+```
+
+Podemos visualizar a la matriz de correlaciones mediante un correlograma:
+```{r, include=FALSE}
+require(corrplot)
+```
+
+```{r, echo=FALSE}
+corrplot(cor.mat3, type="lower", order="original", tl.col="black", tl.cex=0.7, tl.srt=45)
+```
+
+Observamos las correlaciones entre las distintas variables, asi como los niveles de significacion. Observamos que existe correlacion entre todas las variables. Como buscamos colinealidad, esperamos que los valores fuera de la diagonal sean mayores a 0.3 (baja colinealidad), mas tendientes a 0.5 (colinealidad media) y de forma ideal igual o mayor a 0.7(alto grado de colinealidad).
+
+En el caso de esta matriz, podemos observar claramente la existencia de colinealidad en todos los casos, siendo la norma un grado de colinealidad medio-alto. 
+
+Observamos que la variable aceleracion se comporta de forma distinta al resto de variables, por lo que si agrupamos variables en dos grupos quedaría aislada por su comportamiento frente al resto.
+
+Podemos hacer un cluster de variables, es decir agrupar variables en funcion de su correlacion.
+
+```{r, echo=FALSE}
+corrplot(cor.mat3, type="full", order="hclust", addrect = 2,
+         tl.col="black", tl.cex=0.7, tl.srt=45)
+```
+
+Los resultados del cluster son dos grupos: el primer grupo formado por las variables aceleración y RPM y en el segundo grupo el resto de variables
+
+La división se debe a que todas las variables tienen una relación lineal positiva, excepto la variable aceleración que tiene una relación lineal negativa con el resto de variables y rpm cuya asociación con el resto de variables es bastante baja.
+
+###2.3.2. Determinante de la matriz de correlaciones
+
+Calculamos el determinante de la matriz de correlaciones para comprobar si existe multicolinealidad:
+
+```{r, echo=FALSE}
+det(cor.mat3)
+```
+
+El determinante es cercano a cero, lo que indica un alto grado de multicolinealidad entre las variables involucradas en la matriz, confirmando nuestras observaciones de la matriz de correlaciones.
+
+
+###2.3.3. Test de esfericidad de Barlett
+
+El test de esfericidad de Bartlett busca contrastar la hipótesis nula de que la matriz de correlaciones es igual a una matriz de identidad2. Lo que nos interesa para efectos de buscar multicolinealidad, por lo tanto, es rechazar la hipótesis nula, y aceptar la hipótesis alternativa de que la matriz es distinta a una matriz de identidad, y por ende hay un nivel suficiente de multicolinealidad entre las variables. Este procedimiento es particularmente útil cuando el tamaño muestral es pequeño.
+
+Aplicamos el test de esfericidad de Barlett y obtenemos el siguiente resutado:
+
+```{r,include=FALSE}
+library(psych)
+```
+
+
+```{r, echo=FALSE}
+print(cortest.bartlett(cor.mat3, n=nrow(completedata_rf)))
+```
+Siendo una distribución chi2 con 45 grados de libertad y H0=las variables son independientes, con un pvalor de 6.038611e-249 se rechaza H0 y, por tanto, se asume la multicolinealidad de las variables.
+
+
+###2.3.4. KMO global
+
+El índice KMO compara la magnitud de los coeficientes de correlación observados con la magnitud de los coeficientes de correlación parcial. Este estadístico varía entre 0 y 1, pudiendo clasificar la calidad del indice de la siguiente manera:
+- KMO>0.9: muy bueno
+- 0.9>KMO>0.8: bueno
+- 0.8>KMO>0.7: aceptable
+- 0.7>KMO>0.6: mediocre
+- 0.6>KMO: malo. Para valores por debajo de 0.5 hay que considerar cambiar de variables o de tecnica, ya que es muy poco probable que los modelos funcionen si esta prueba no se cumple. 
+
+```{r, include =FALSE}
+require(ppcor)
+```
+
+```{r, echo=FALSE, include=FALSE}
+p.cor.mat=pcor(completedata_rf) 
+p.cor.mat2=as.matrix(p.cor.mat$estimate)
+```
+
+
+```{r, echo=FALSE,cache=TRUE}
+kmo.num1 = sum(cor.mat3^2) - sum(diag(cor.mat3^2)) #numerador
+kmo.denom1 = kmo.num1 + (sum(p.cor.mat2^2) - sum(diag(p.cor.mat2^2))) #denominador
+kmo1 = round(kmo.num1/kmo.denom1,2)
+kmo1
+```
+
+Devuelve un valor aceptable, de 0.75. Es un indicador de buen nivel de multicolinealidad entre las variables. 
+
+###2.3.5. KMO Parcial
+
+Ahora calculamos el KMO parcial o MSA para cada una de las variables con el objetivo de matizar y corroborar el resultado de la prueba del KMO, identificando las variables que no son suceptibles de ser reducidas y aquellas que si lo son. 
+
+```{r, echo=FALSE}
+p.cor.mat2=data.frame(p.cor.mat2)
+#Ponemos como nombre de filas y columnas el nombre de las filas y columnas de la matriz de correlaciones
+rownames(p.cor.mat2) = c(rownames(cor.mat)) 
+colnames(p.cor.mat2)=c(colnames(cor.mat))
+p.cor.mat2
+```
+
+La diferencia entre la correlacion global y la correlacion parcial es la influencia del resto de variables. Si la correlacion es de 0.84 entre 2 plazos, si pudiese exlcuir el resto de observciones, la correlacion global seria 0.84 con lo cual el resto devariables influyen poco. 
+
+Los coeficientes de correlacion parcial deben tener un valor bajo para que las variables compartan factores comunes.
+
+Los elementos de la diagonal de esta matriz son similares al estadistico KMO para cada par de variables e interesa que esten cercanos a 1. Esto se cumple en el ejemplo. 
+
+Obtenemos el MSA
+```{r,echo=FALSE,cache=TRUE}
+variable1 <- NULL
+valores1  <- NULL
+for (j in 1:ncol(completedata_rf)){
+        kmo_j.num <- sum(cor.mat[,j]^2) - cor.mat[j,j]^2  #cojo todos los elementos de la fila 1 menos el 1 al cuadrado
+        kmo_j.denom <- kmo_j.num + (sum(p.cor.mat2[,j]^2) - p.cor.mat2[j,j]^2) #lo mismo pero con los cuadrados
+        kmo_j <- kmo_j.num/kmo_j.denom
+        variable1 <- c(variable1,colnames(completedata_rf)[j])
+        valores1 <- c(valores1,kmo_j)
+        df_msa1 <- data.frame(variable1,valores1)
+        print(paste(colnames(completedata_rf)[j],"=",kmo_j))
+}
+```
+
+Observamos que los MSA son aceptables en general, excepto para las variables rpm y plazas cuyos valores son inferiores a 0,50 por tanto vamos a proceder a eliminar estas variables de nuestro análisis.
+
+##2.4 Resultados quitando las variables plazas y rpm
+
+Debido a los resultados del MSA vamos a quitar las variables plazas y rpm de nuestro análisis, por ello volvemos a realizar la imputación de valores NA sin tener en cuenta estas variables (debido a su baja correlación con el resto de variables).
+
+Veremos si disminuyen los diferencias de imputación al quitar estas variables.
+
+###2.4.1. Diferencias imputacion
+
+**Error mice**
+
+```{r,include=FALSE,cache=TRUE}
+imputed_Data <- mice(dataset_mod[,c(-1,-2,-7,-9,-15,-16)], m=5, maxit = 50, method = 'pmm', seed = 123)
+```
+
+```{r, echo=FALSE}
+completeData1 <- complete(imputed_Data,1)
+completeData2 <- complete(imputed_Data,2)
+completeData3 <- complete(imputed_Data,3)
+completeData4 <- complete(imputed_Data,4)
+completeData5 <- complete(imputed_Data,5)
+CompleteData <- (completeData1 + completeData2 + completeData3 + completeData4 + completeData5)/5
+cor.mat = round(cor(dataset[,c(-1,-2,-7,-9,-15,-16)], use="complete.obs"),2) 
+cor.mat2 = round(cor(CompleteData),2)
+diferencia_mice <- cor.mat - cor.mat2
+flattenCorrMatrix <- function(cormat) {
+  ut <- upper.tri(cormat)
+  data.frame(
+    row = rownames(cormat)[row(cormat)[ut]],
+    column = rownames(cormat)[col(cormat)[ut]],
+    cor  =(cormat)[ut]
+    )
+}
+diferencia_mice_flat <- flattenCorrMatrix(diferencia_mice)
+error_mice2 <- round(sum(abs(diferencia_mice_flat$cor))/nrow(diferencia_mice_flat),3)
+error_mice2
+```
+
+**Error rf**
+
+```{r,include=FALSE,cache=TRUE}
+imputed_data_rf2 <- missForest(dataset_mod[,c(-1,-2,-7,-9,-15,-16)])
+```
+
+
+```{r,echo=FALSE,cache=TRUE}
+completedata_rf <- imputed_data_rf2$ximp
+cor.mat3 = round(cor(completedata_rf),2)
+diferencia_rf <- cor.mat- cor.mat3
+diferencia_rf_flat <- flattenCorrMatrix(diferencia_rf)
+error_rf2 <- round(sum(abs(diferencia_rf_flat$cor))/nrow(diferencia_rf_flat),3)
+error_rf2
+```
+
+#####Comparamos las diferencias de imputación: con las variables plazas y rpm (situacion anterior) y sin estas variables.
+
+```{r,echo=FALSE}
+table(error_mice1,error_mice2)
+```
+
+```{r,echo=FALSE}
+table(error_rf1,error_rf2)
+```
+
+Como se puede comprobar disminuye las diferencias entre la matriz de correlaciones original (sin NAs) cuando quitamos las variables plazas y rpm para los dos algoritmos (mice y random forest), siendo tambien el algoritmo de random forest el mas preciso y por eso lo utilizaremos.
+
+###2.4.2. Matriz de correlación
+
+Representamos de nuevo la matriz de correlaciones entre las variables con el cluster de dos grupos
+
+```{r}
+corrplot(cor.mat3, type="full", order="hclust", addrect = 2,
+         tl.col="black", tl.cex=0.7, tl.srt=45)
+```
+
+Como se puede apreciar en este caso la variable aceleracion es la unica que tiene relacion inversa respecto del resto de variables y por eso se encuentra sola en otro grupo, antes estaba también la variable rpm. Del mismo modo las correlaciones entre las variables ahora son mas altas, exceto para la variable peso que se puede apreciar a simple vista que en lineas generales la relación con respecto al resto de variables no es muy fuerte.
+
+###2.4.3. KMO
+
+Volvemos a calcular el KMO
+
+```{r, include =FALSE}
+require(ppcor)
+```
+
+```{r, echo=FALSE}
+p.cor.mat=pcor(completedata_rf) 
+p.cor.mat2=as.matrix(p.cor.mat$estimate)
+```
+
+```{r, echo=FALSE,cache=TRUE}
+kmo.num2 = sum(cor.mat3^2) - sum(diag(cor.mat3^2)) #numerador
+kmo.denom2 = kmo.num2 + (sum(p.cor.mat2^2) - sum(diag(p.cor.mat2^2))) #denominador
+kmo2 = round(kmo.num2/kmo.denom2,2)
+```
+
+```{r,echo=FALSE}
+table(kmo1,kmo2)
+```
+
+Como se puede comprobar el KMO ha mejorado al quitar las variables Plazas y RPM del análisis. Lo cual es un indicador de la bondad de la decisión de quitar estas variables.
+
+###2.4.4. MSA
+
+Calculamos las diferencias del MSA al quitar las variables plazas y rpm
+
+```{r, echo=FALSE}
+p.cor.mat2=data.frame(p.cor.mat2)
+#Ponemos como nombre de filas y columnas el nombre de las filas y columnas de la matriz de correlaciones
+rownames(p.cor.mat2) = c(rownames(cor.mat)) 
+colnames(p.cor.mat2)=c(colnames(cor.mat))
+```
+
+
+```{r,echo=FALSE,cache=TRUE}
+variable2 <- NULL
+valores2 <- NULL
+for (j in 1:ncol(completedata_rf)){
+        kmo_j.num <- sum(cor.mat[,j]^2) - cor.mat[j,j]^2  #cojo todos los elementos de la fila 1 menos el 1 al cuadrado
+        kmo_j.denom <- kmo_j.num + (sum(p.cor.mat2[,j]^2) - p.cor.mat2[j,j]^2) #lo mismo pero con los cuadrados
+        kmo_j <- kmo_j.num/kmo_j.denom
+        variable2 <- c(variable2,colnames(completedata_rf)[j])
+        valores2 <- c(valores2,kmo_j)
+        df_msa2 <- data.frame(variable2,valores2)
+}
+```
+
+
+```{r,echo=FALSE}
+variable3 <- c("rpm","plazas")
+valores3 <- c(0,0)
+df_msa3 <- data.frame(variable3,valores3)
+colnames(df_msa3) <- c("variable2","valores2")
+df_msa2 <- df_msa2[order(df_msa2$variable2),]
+df_msa2 <- rbind(df_msa2[1:7,],df_msa3[2,],df_msa2[8:9,],df_msa3[1,],df_msa2[10,])
+df_msa1 <- df_msa1[order(df_msa1$variabl),]
+df_msa <- data.frame(df_msa1$variable1,df_msa1$valores1,df_msa2$valores2)
+df_msa[,"Diferencia_msa"] <- df_msa$df_msa2.valores2-df_msa$df_msa1.valores1
+colnames(df_msa) <- c("Variable","MSA1","MSA2","Diferencias MSA")
+df_msa[c(-8,-11),c(1,4)]
+sum(df_msa[c(-8,-11),4])
+```
+
+El MSA mejora para las variables: CC, Cilindro y potencia. Sin embargo, empeora para el resto de variables.
+Aunque como se puede apreciar al sumar las diferencias de todas las variables, la diferencia es muy pequeña.
+
+## 2.5. Análisis factorial
+
+El analisis factorial (ANFAC) es un método de análisis multivariante que intenta explicar, según un modelo lineal, un conjunto extenso de variables observables mediante un número reducido de variables hipotéticas llamadas factores. Un aspecto esencial del ANFAC es que los factores no sean directamente observables, obedeciendo a conceptos de naturaleza mas abstracta que las variables originales. (Cuadras, Metodos de Analisis Multivariante, 1.991)
+
+Un factor no tiene la informacion que tienen las variables. Tenemos que ponerle un nombre a los factores, que no dejan de  ser la esencia de la relacion entre variables.
+
+Metodos de extraccion de factores. Hay 2:
+
+A) ACP o extraccion de componentes principales a partir de la matriz de correlaciones. A partir de ahi, se reduce la dimension. Componentes principales se extraen tantos como variables (en este caso 10). Nos quedamos solo con aquellos componentes pricipales que sean realmente representativos de la relacion entre las variables, que seran los factores. Es decir, se busca un numero reducido de "factores" que expresen lo que es "común" al conjunto de variables
+
+B) Análisis del factor común (AFC) o extraccion del factor principal. Es el mas "puro". Decimos que es puro ya que el primer metodo (componentes principales) se olvida del factor unico. Pervierte el esquema del analisis factorial. Todas las variables dependen de los factores a la vez que todos los factores dependen de las variables.
+
+###2.5.1. Método de los componentes principales 
+
+```{r, include=FALSE}
+library(FactoMineR)
+library(factoextra)
+```
+
+En este apartado procederemos a analizar el modelo factorial prescindiendo de las unicidades para expresar las variables empleando exclusivamente factores comunes.
+
+Para ello, determinaremos la primera componente principal o factor F1 de forma que explique la mayor parte de las variables. Una vez se obtenga este, se le resta a las variables y sobire la variabilidad restante se determina la segunda componente principal o F2, siguiendo el mismo criterio.
+```{r, echo=FALSE}
+tterreno.acp = PCA(completedata_rf, scale.unit = TRUE, ncp = ncol(completedata_rf), graph = TRUE)
+```
+
+La primera dimension o primer componente explica el 65.46%, mientras que la segunda explica el 13.08%. Tenemos una explicación conjunta del 78.54% de la varianza. Mientras que en un analisis cluster agrupamos observaciones, en este caso estamos agrupando variables para ver sus asociaciones.
+
+Observamos que las variables cilindro y potencia se comportan practicamente igual. Cons90 y cc también se comportan de forma muy parecida. Por otro lado se observa que las variables precio y cc se comportan de forma muy similar. 
+
+Las variables que mas distan en su comportamiento son velocidad y aceleracion, pudiendo establecerse la siguiente relacion: a mayor aceleracion menor velocidad, y viceversa. Esto tiene sentido puesto que segun se configuren los desarrollos y la relacion de la caja de cambios, mas inclinacion a la velocidad punta o a la aceleracion tendra un vehiculo (*Tipos de desarrollos y de relación en caja de cambios, 2018*). Asi, un todoterreno mas *adventure* tendra mas aceleracion que uno pensado primordialmente para un uso habitual en carretera y un uso esporadico en caminos.
+
+Sabiendo que la longitud del vector de una variable que toca el circulo quiere decir que su explicacion aproximada es del 100%, observamos que las variables mejor explicadas por los componentes principales 1 y 2 son potencia y aceleracion, siendo cons90 el vector mas corto y por lo tanto la variable menos explicada. En este entido, conforme mas lejos de la circunferencia se encuentran los vectores, menor es la explicacion que estan dando los 2 componentes principales de dicha variable y, por tanto, son necesarios mas de 2 CCPP. 
+
+El siguiente grafico plantea en escala de colores la contribucion de los factores extraidos en la explicacion de cada variable, es decir su comunalidad.
+
+####2.5.1.1. Contribucion CCPP en la explicacion de las variables
+
+Prestamos atencion a los autovalores (*eigenvalue*) y al % de varianza explicada:
+```{r,echo=FALSE}
+autoval= tterreno.acp$eig 
+round(autoval, 2)
+```
+Los autovalores nos dan una medida de tolerancia para poder decidir con cuanta cantidad de componentes o factores es recomendable quedarnos. Para elegir el numero de componentes a emplear podemos utilar la regla de Kaiser. Los autovalores iguales o mayores a 1 indican que el componente logra explicar mas varanza que una variable por si sola, así la regla de Kaiser establece que solo se escogeran aquellos componentes con autovalores superiores a 1 (Daróczi, 2015). 
+
+Prestando atencion a los autovalores, unicamente los dos primeros componentes tienen un autovalor superior a 1.  En este sentido y en línea con el grafico anterior, nos quedaremos con las 2 dimensiones representadas por su capacidad explicativa. 
+
+Veamos de forma grafica el poder explicativo de los componentes principales:
+```{r, echo=FALSE}
+
+barplot(autoval[, 2], names.arg=1:nrow(autoval), 
+        main = "Varianza explicada por los CCPP",
+        xlab = "Componentes Principales",
+        ylab = "Porcentaje explicado de la varianza",
+        col ="steelblue",
+        ylim=c(0,105))
+lines(x = 1:nrow(autoval), autoval[, 2], 
+      type="b", pch=19, col = "red")
+lines(x = 1:nrow(autoval), autoval[, 3], 
+      type="o", pch=21, col = "blue", bg="grey")
+```
+
+Se observa una gran diferencia entre el primer componente y el resto. La linea azul representa el % de varianza explicada acumulada, mientras que la linea roja marca la varianza explicada por cada componente. Los cambios de pendiente ayudan a observar la capacidad explicativa que va aportando cada componente a medida que se van incorporando al modelo, quedando patente que a partir del tercer componente la contribucion marginal es muy pequeña.
+
+```{r, include=FALSE}
+tterreno.acp$var$coord #coordenadas de las observaciones 
+#si miramos las coordenadas de la dimension 1 y 2, podemos situar en el grafico circular las variables.
+```
+
+```{r, include = FALSE}
+#Comprobamos que el autovalor de cada factor j es la suma de los cuadrados de los a_ij
+CP1=tterreno.acp$var$coord[,1]
+CCP2=CP1^2
+sum(CCP2)
+#La suma conforma el autovalor del primer componente.
+```
+
+El siguiente grafico muestra la contribucion de las componentes principales 1 y 2 en la explicacion de cada variable (su comunalidad), en escala de colores:
+```{r, echo=FALSE}
+posiciones <- tterreno.acp$ind$coord[,1:2]
+#creamos el objeto posiciones que nos servira para representar las observaciones y para agruparlas en analisis cluster
+```
+
+```{r, echo=FALSE}
+fviz_pca_var(tterreno.acp, col.var="cos2") +
+        scale_color_gradient2(low="white", mid="blue", 
+                              high="green", midpoint=0.5) + theme_minimal()
+```
+
+Cuanto mas verde sea el vector de la variable, mas explicada queda por los componentes principales 1 y 2. Podemos observar como apenas se ha perdido informacion de las variables potencia y aceleracion, siendo las variables referentes al consumo (cons120 y cons90) aquellas sobre las que se pierde mas informacion.
+
+Para ver cuanta informacion aportan los componentes principales 1 y 2 de las variables, sumamos las comunalidades de ambas componentes para cada variable. 
+```{r, echo=FALSE}
+tterreno.acp$var$cos2
+#La suma de las comunalidades es 1, siendo la comunalidad el cos2. Esto es asi porque estamos prescindiendo de las unicidades.
+```
+
+
+####2.5.1.2. Contribucion de las variables a los CCPP
+
+También es interesante conocer la contribución de las variables a los CCPP. A mayor valor de la medida (expresado como % de la relacion por cociente entre la comunalidad de la variable respecto del autovalor del CP) mayor contribucion de la variable.
+
+```{r, echo=FALSE}
+tterreno.acp$var$contrib
+```
+
+Vemos como las variables que mas contribuyen a la primera componente principal son precio, cilindro, cc, potencia y consumo urbano, aunque las diferencias con el resto de variables no son muy grandes. 
+
+En la segunda componente si se aprecian diferencias mas significativas, siendo protagonistas aceleracion y peso, seguidas de velocidad y precio. El resto de variables contribuyen conjuntamente en un 17.36%
+
+Si sumamos la contribución de cada variable a la dimension 1 y a la dimension 2, la contribucion de las variables a ambas dimensiones es la siguiente:
+
+```{r, echo=FALSE}
+#Para conocer la contribucion de las variables a la explicacion de un numero concreto de CCPP, simplemente sumamos el producto de la contribucion de la vble en cada uno de ellos por el valor propio de cada uno de ellos:
+A=as.matrix(tterreno.acp$var$contrib[,1:2])/100  
+B=as.matrix(tterreno.acp$eig[1:2,1])
+A%*%B
+```
+
+
+```{r, include=FALSE}
+apply(as.matrix(tterreno.acp$var$contrib), 2, sum)
+#Comprobamos que suma 100 por columnas
+```
+
+
+Contribucion de las variables a la dimension 1:
+```{r, echo=FALSE}
+fviz_contrib(tterreno.acp, choice = "var", axes = 1)
+```
+
+Contribucion de las variables a la dimension 2:
+```{r, echo=FALSE}
+fviz_contrib(tterreno.acp, choice = "var", axes = 2)
+```
+
+En ambos gráficos, la línea roja representa la uniformidad en la representación: si cada variable tuviese un poder explicativo uniforme todas quedarían a esa altura. Asi, se comprueba que la dimension 1 esta mas equilibrada en cuanto a composicion, mientras que para la dimension 2 las variables aceleracion y peso son esenciales por su enorme contribucion, siendo tambien muy importante la variable velocidad.
+
+
+La contribucion de cada variable a la explicacion de los dos ejes principales, en escala de color
+
+```{r, echo=FALSE}
+fviz_pca_var(tterreno.acp, col.var="contrib")
+```
+
+```{r, echo=FALSE}
+head(tterreno.acp$ind$contrib)
+```
+
+De la misma manera podemos representar las observaciones con su contribucion a la explicacion de los PCA:
+```{r, echo=FALSE}
+fviz_pca_ind(tterreno.acp, alpha.ind="contrib") +
+        theme_minimal()
+```
+Aquellos con mayor contribucion a las componentes principales 1 y 2 tienen el punto en color negro, mientras que los que tienen una contribucion mas baja a estos componentes tienen un punto mas claro.
+
+####2.5.1.3. Matriz de componentes no rotados
+
+Sabiendo que nuestra intención es reducir la dimensión a dos componentes principales, generamos la matriz de componentes no rotados para observar la carga factorial de los ítems en los componentes con los que nos vamos a quedar:
+```{r, echo=FALSE}
+TT.rotPrueba = principal(completedata_rf, nfactors=2, rotate ="none")
+TT.rotPrueba
+```
+Como podemos observar, las cargas factoriales correspondientes a cada variable para cualqueira de los dos factores. Esto dificulta la identificación de a qué factor tiende a asociarse cada variable. Por esta razón procederemos a la rotación factorial.
+
+
+##2.6. Rotaciones factoriales
+
+La matriz de saturaciones factoriales o matriz factorial indica la relacion entre los factores y las variables. Sin embargo, del resultado que finalmente obtenemos puede ser dificil extraer una interpreacion sencilla de los factores. La rotacion factorial pretende seleccionar la solucion mas sencilla e interpretable siguiendo el criterio de parsimonia. El objetivo es girar los ejes de coordenadas, que representan a los factores, de manera que se aproximen al maximo a las variables en que estan saturados.
+
+Existen dos sistemas para rotar la matriz:
+- Rotaciones ortogonales: conservan la ortogonalidad inicial de los ejes, lo que supone que los factores seguiran incorrelados dos a dos.
+-Rotaciones oblicuas: no conservan la ortogonalidad de los ejes.
+
+
+###2.6.1. Rotacion Varimax
+Conociendo que queremos reducir la dimensión a 2, realizaremos una solucion rotada mediante el procedimiento de varianza maxima (*Varimax*) con el objetivo de explicar con 2 factores las 10 variables iniciales. Varimax es un ajuste de rotación (rotacion ortogonal) de los componentes,  que minimiza el número de variables que tienen saturaciones altas en cada factor. Con este método se simplifica la interpretación de los factores. (*IBM Knowledge Center, n.d.*)
+
+Para aplicar la rotacion Varimax normalizaremos los datos y aplicaremos componentes principales con rotacion Varimax, obteniendo los siguientes resultados:
+```{r, echo=FALSE}
+tterreno.norm = data.frame (scale (completedata_rf)) # normalizamos
+```
+
+```{r,include=FALSE}
+summary(tterreno.norm)
+```
+
+```{r}
+TT.rotP = principal(tterreno.norm, nfactors=2, rotate ="none")
+TT.rotP
+```
+
+
+
+
+
+Realizamos la rotacion Varimax y obtenemos los siguientes resultados:
+```{r, echo=FALSE}
+TT.rot = principal(tterreno.norm, nfactors=2, rotate ="varimax")
+TT.rot
+```
+Podemos observar como la rotacion da lugar a una explicacion idéntica de la varianza. Se observa también que los factores explican una cantidad de varianza similar, a diferencia de lo que ocurría en la solucion no rotada.
+
+Hemos obtenido un primer factor asociado especialmente al precio, al peso y al consumo en menor medida. Por otro lado, el segundo factor explica las características asociadas al rendimiento del motor, destacando en carga factorial la aceleración, la velocidad, la potencia y, en menor medida, el numero de cilindros. En este sentido, por resumir podriamos denominar "*Valores de rendimiento del motor*" (sin ser exactamente así) al segundo factor, puesto que se centra en las macros cuantitativas de motor dejando un poco de lado el consumo, mientras que el primer factor podría denominarse "*precio, peso y consumo*" (también sin ser exacto). 
+
+
+
+```{r, include=FALSE}
+round(sapply(tterreno.norm, mean, na.rm = T), 2)
+```
+
+```{r, include=FALSE}
+sapply(tterreno.norm, sd, na.rm=T)
+```
+
+```{r, include=FALSE}
+TT.acp=prcomp(tterreno.norm)
+summary(TT.acp)
+```
+
+```{r, include=FALSE}
+TT.acp$sdev
+(TT.acp$sdev)^2
+sum((TT.acp$sdev)^2)
+```
+
+```{r,include=FALSE}
+screeplot(TT.acp, type="lines")
+```
+
+```{r, include=FALSE}
+TT.rot$communality  #comunalidad primer eje 
+```
+
+```{r,include=FALSE}
+TT.rot$loadings  #cargas factoriales
+```
+
+Suma de las cargas factoriales al cuadrado es igual al "autovalor rotado"
+
+```{r,include=FALSE}
+sum(TT.rot$loadings^2) 
+```
+
+```{r,include=FALSE}
+require(qcc)
+```
+
+
+```{r, include=FALSE}
+varianzas = TT.acp$sdev^2
+```
+
+```{r, include=FALSE}
+#pareto.chart(varianzas, ylab="Varianzas")
+```
+
+
+```{r, include=FALSE}
+TT.acp$rotation
+```
+
+```{r, include=FALSE}
+TT.acp$rotation[,1] 
+```
+
+```{r, include=FALSE}
+TT.acp$rotation[,2] 
+```
+
+```{r, include=FALSE}
+sum(TT.acp$rotation[,1]^2)
+#Dado que hemos normalizado los datos antes de tratar la rotacion, la suma del cuadrado de las cargas es 1.
+```
+
+```{r, echo=FALSE}
+library(psych)
+```
+
+```{r, include=FALSE}
+TT.acp$rotation[1,] 
+```
+
+```{r, include=FALSE}
+sum(TT.acp$rotation[1,]^2)
+```
+
+
+
+###2.6.2. Rotacion Oblimin
+
+Existen otros procedimientos de rotación, como por ejemplo “Oblimin”, que es un tipo de rotación oblicua, que se utiliza cuando se considera que los componentes/factores a extraer no son completamente independientes entre sí, debido a que se entienden como pertenecientes a un mismo concepto latente general. Vamos a probar los resultados que obtendriamos en caso de rotar la matriz con este metodo:
+```{r, echo=FALSE}
+require(GPArotation)
+TT.rot.ob = principal(tterreno.norm, nfactors=2, rotate ="oblimin")
+TT.rot.ob
+```
+A modo de observacion, se ha obtenido un *Heywood Case*. Dado que las comunidades son correlaciones al cuadrado, se esperaría que siempre estén entre 0 y 1. Sin embargo, una peculiaridad matemática del modelo de factor común es que las estimaciones finales de comunalidad podrían exceder 1. Si una comunidad es igual a 1, se hace referencia a la situación como un caso Heywood, y si una comunalidad excede 1, es un caso ultra-Heywood. Un caso ultra-Heywood implica que algún factor único tiene una varianza negativa, una clara indicación de que algo está mal. Los expertos no están de acuerdo sobre si una solución de factores con un caso de Heywood puede considerarse legítima o no (*SAS/STAT(R) 9.2 User's Guide, 2018*).
+
+Al margen de esta observacion, se obtiene una explicacion de la varianza idéntica al resto de soluciones. Sin embargo, teniendo en cuenta que se ha obtenido un Heywood Case y que los factores de la solución rotada por el método varimax resultan más fácilmente interpretables, se descarta esta solución.
+
+
+
+##2.7 Método del factor principal
+
+En este apartado procedemos a analizar el modelo factorial lineal completo, con factores comunes y unicos. Es decir, en este modelo se tendrá en cuenta tanto la varianza de la variable explicada por los factores comunes o comunalidad (columna h2), como la varianza de la variable explicada por el factor único de cada variable o unicidad (columna u2).
+
+A diferencia del ACP, no pedimos modelos con tantos factores como variables para una primera exploración, ya que dicha solución en el caso de factorial no converge. Esto se debe a que a diferencia del ACP, AFC trabaja sólo con la covarianza, y no con la varianza total.
+```{r, echo=FALSE}
+factor_analysis<-fa(completedata_rf, nfactors=2, rotate="none", max.iter=500, fm="pa")
+factor_analysis
+```
+A partir de los autovalores, podemos pensar que sería razonable trabajar con una solución de 2 factores atendiendo a la regla de Kaiser (ya que sólo 2 factores logran autovalor > 1). 
+
+Existe, sin embargo, y a diferencia del ACP, otro indicador que ayuda a tomar la decisión a nivel estadístico. Este indicador es el promedio de las comunalidades individuales (promedio de la columna h2, que indica para cada variable la comunalidad de cada una de estas con el conjunto de variables restantes). El promedio de las comunalidades individuales funciona como límite que indica con cuántos factores es razonable quedarse.  *(Zamora, Esnaola and Boccardo, 2015)*. 
+
+En este caso, al resultar 0.73 resulta razonable la solucion de 2 factores. Este resultado supone una perdida de varianza total explicada. En este sentido, cabe mencionar que en el AFC las comunalidades individuales muestran cómo covaría la variable individual con el resto de las variables. En caso de que alguna variable tuviese comunalidad < 0.3, existiría problemas para la buena convergencia, parsimonia e interpretabilidad de los modelos. En este sentido, cuando la covarianza (comunalidad) es similar a la varianza total (cercana a 1) se espera que los modelos AFC y ACP sean similares en sus resultados. En casos en que son muy distintas, por ejemplo comunalidades de 0,7 o menos, probablemente ambos modelos darán resultados diferentes *(Zamora, Esnaola and Boccardo, 2015)*.  
+
+Así, podemos comprobar que algunas comunalidades de nuestro modelo AFC son inferiores a 0.7, lo que puede dar pie a las diferencias existentes entre ambos modelos. 
+
+Dado que no creamos que exista una realidad subyacente e indetectable a simple vista para explicar las características de los todoterreno (como sería el caso del papel que juga la inteligencia en la obtención de buenas notas por parte de un grupo de alumnos) y sabiendo que nuestro objetivo es explicar el máximo de varianza posible de cara a conocer las carácterísticas fundamentales de los todotererno, descartamos esta solución frente a la solución rotada de 2 componentes anteriormente descrita.
+
+
+#3. Analisis Cluster:
+
+Con el objetivo de obtener mas informacion sobre los todo terrenos, vamos a realizar un analisis cluster para comprobar si podemos agrupar los vehículos en funcion de las variables explicativas.
+
+```{r, include=FALSE}
+#Cargamos las librerías.
+library(cluster)
+library(dendextend)
+library(fpc)
+library(factoextra)
+library(NbClust)
+```
+
+```{r, echo=FALSE}
+df_cluster <- as.data.frame(posiciones)
+```
+
+###3.1. ¿Tiene sentido realizar el análisis cluster?
+
+Para realizar el análisis cluster vamos a utilizar solo las dos factores obtenidos mediante el método de los componentes principales antes de su rotación. Recordemos que con estos dos factores se explica el 80% de la variabilidad de las observaciones. Podemos observar como podemos utilizar el método de los componentes principales como técnica de reducción de la dimesión. 
+
+Vamos a visualizar un grafico de densidad para tener una idea de la distribucion de las observaciones en las componentes principales 1 y 2 y ver si hay indicios de asociacion:
+
+```{r, echo=FALSE,cache=TRUE}
+library("ggplot2")
+graf.datos <- ggplot(df_cluster, aes(x=Dim.1, y=Dim.2)) +
+geom_point()+
+geom_density_2d() # Estimación bidimensional de la densidad
+graf.datos
+```
+Observamos que hay cierta asociacion en funcion de la posicion de las observaciones, distinguiendo un sector mas cercano al eje 2 y otro ms alejado. 
+
+Vamos a comparar este grafico de densidad con el pertinente a un grupo de datos generados aleatoriamente para ambas dimensiones con el objetivo de probar que ciertamente existen patrones de asociacion:
+
+```{r, echo=FALSE}
+#Generamos un conjunto aleatorio de datos para las dos variables
+set.seed(123)
+n = nrow(df_cluster)
+random_df = data.frame(
+x = runif(nrow(df_cluster), min(df_cluster$Dim.1), max(df_cluster$Dim.1)),
+y = runif(nrow(df_cluster), min(df_cluster$Dim.2), max(df_cluster$Dim.2)))
+```
+
+```{r, echo=FALSE}
+#Colocamos en objeto para representación posterior
+graf.aleat=ggplot(random_df, aes(x, y)) +
+geom_point() +
+labs(x="dimension_1",y="dimension_2") +
+stat_density2d(aes(color = ..level..))
+```
+
+```{r, include=FALSE}
+require(gridExtra)
+```
+
+```{r, echo=FALSE,cache=TRUE}
+grid.arrange(graf.datos, graf.aleat, nrow=1, ncol=2)
+#Exige haber empaquetado los objetos, como hemos hecho; equivale a par(mfrow=c(f, c))
+```
+
+Podemos apreciar las diferencias en las densidades de ambos gráficos. El patrón de asociación de los datos generados aleatoriamente es distinto al de la muestra. En la muestra podriamos distinguir 2 grupos en funcion de su posicion en respecto de la dimension 1 (grupo 1 < 2.5 < grupo 2), ademas de subgrupos claros por la densidad. En el gráfico de datos generados aleatoriamente, aunque existe cierta asociación, cuesta mas distinguir grupos concretos. 
+
+
+####3.1.1. Evaluación de la bondad del análisis cluster
+
+Vamos a comprobar si efectivamente existen argumentos para proceder a realizar una analisis cluster. Para ello utilizaremos el **Estadístico de Hopkins**.
+
+El estadistico de Hopkins se trata de un contraste frente a la estructura aleatoria a través de una distribución uniforme del espacio de datos; la idea es contrastar una hipótesis de distribución uniforme / aleatoria de los datos frente a su alternativa (que no lo sea); de aceptarse la hipótesis nula, no existirían grupos de observaciones interesantes en el conjunto analizado. Valores próximos a 0.5 señalan promedios de distancias entre vecinos los más próximos muy similares, haciendo irreal e inoperante el agrupamiento; por el contrario, valores próximos a 0 permitirían rechazar (*Lopez Zafra, 2017*).
+
+
+Calculamos el estadístico para la muestra de todoterrenos:
+```{r, echo=FALSE}
+require(clustertend)
+# Aplicamos el estadístico sobre los datos reales
+set.seed(123)
+
+hopkins(df_cluster, n = nrow(df_cluster)-1)
+```
+El estadístico es bastante inferior a 0.5, permitiendo rechazar la hipotesis nula de que la distribucion de los datos es aleatoria y, por tanto, tiene sentido llevar a cabo un analisis cluster.
+
+Calculamos el estadístico para el conjunto de datos aleatorios:
+```{r,echo=FALSE}
+#y ahora sobre los datos aleatorios
+set.seed(123)
+hopkins(random_df, n = nrow(random_df)-1)
+```
+
+Como se puede apreciar, con los datos aleatorios el estadístico de Hopkins tiene un valor muy próximo a 0.5 y, por tanto, indica que no hay posibilidad de realizar un analisis cluster.
+
+
+###3.2. Identificación del número de grupos.
+
+Una vez aceptada la conveniencia de llevar a cabo el análisis cluster, hemos de determinar el nÚmero de clusters a utilizar.
+
+Para ello utilizaremos el paquete de R NbClust, que proporciona 30 índices para determinar el número de clústeres y propone al usuario el mejor esquema de agrupamiento a partir de los diferentes resultados obtenidos al variar todas las combinaciones de número de clústeres, medidas de distancia y métodos de agrupamiento (*Charrad et al., 2015*)
+
+```{r, echo=FALSE,cache=TRUE}
+nb.todos = NbClust(df_cluster, distance = "euclidean", min.nc = 2,
+max.nc = 10, method = "complete", index ="all")
+```
+
+```{r, echo=FALSE,cache=TRUE}
+fviz_nbclust(nb.todos) + theme_minimal() +
+labs(x="Número k de clusters", y="Frecuencia")
+```
+
+Tal y como podemos observar, 9 de los 30 Índices indican que el numero Óptimo de clusters es 2. Aplicando la regla de la mayoria este será, en principio, el número de clusters que utilizaremos.
+
+
+###3.3. Aplicacion del algoritmo K-means
+        
+Tras el estudio de la muestra, viendo que las variables explicativas son de caracter cuantitativo y habiendo hecho las pruebas que permiten establacer el numero adecuado de grupos antes de proceder a la segmetancion, procederemos a aplicar un método no jerárquico. Concretamente, aplicaremos el algoritmo *K-means*. 
+
+Podriamos definir el algoritmo K-means como un algoritmo de clasificación no supervisada (es decir, los datos no tienen etiquetas y se clasifican a partir de su estructura interna (propiedades y características) que agrupa objetos en k grupos basándose en sus características. El agrupamiento se realiza minimizando la suma de distancias entre cada objeto y el centroide de su grupo o cluster (*unioviedo.es, n.d.*). No resulta invariante ante cambios de escala (*Lopez Zafra, 2017*), por eso hemos escalado las variables. 
+
+```{r,include=FALSE}
+require(factoextra)
+```
+
+```{r, echo=FALSE,cache=TRUE}
+set.seed(123)
+prueba1 = kmeans(df_cluster, 2)
+cluster_kmeans <- prueba1$cluster
+```
+
+Observamos los 2 grupos resultantes:
+```{r, echo=FALSE}
+fviz_cluster(list(data = df_cluster, cluster = prueba1$cluster),
+frame.type = "norm", geom = "point", stand = FALSE)
+#representacion grafica
+```
+
+Observamos que existen dos grupos bien definidos. Aunque existe cierto solapamiento en algunas observaciones del cluster 2 que se encuentran claisificadas dentro del cluster1. Vamos a observar su composicion.
+
+```{r, echo=FALSE}
+clasificacion2 <- data.frame(cluster_kmeans)
+#Seguidamente introducimos los resultados del análisis clúster Kmeans.
+df_completoK <- data.frame(completedata_rf, clasificacion2)
+df_completoK <- cbind(df_completoK,dataset_mod$marca,dataset_mod$modelo)
+clusterK1<-df_completoK[df_completoK$cluster_kmeans==1,]
+clusterK2<-df_completoK[df_completoK$cluster_kmeans==2,]
+```
+
+###3.4. Interpretación de los grupos
+
+Cluster 1:
+```{r, echo=FALSE}
+summary(clusterK1)
+```
+El cluster 1 esta compuesto por 23 todoterrenos. Este grupo esta caracterizado por una elevada potencia de motor (el minimo es el maximo del resto de todoterrenos, 136CV) y mayor cilindrada (el minimo es 6 cilindros, que tambien es el valor medio, aunque llegan hasta 8). Tambien se caracterizan por un peso medio elevado, una aceleracion media mas baja respecto al resto de observaciones y una velocidad maxima media superior. Por lo general son todoterrenos con un consumo relativamente alto, tanto urbano como a 90 y 120 km/h. El precio medio de estos vehiculos es el doble que el del resto de todoterrenos.
+
+Cluster 2:
+```{r, echo=FALSE}
+summary(clusterK2)
+```
+Este segundo grupo esta compuesto por aquellos todoterrenos con un motor menos potente por lo general y de menor rendimiento en velocidad, aunque con mas aceleracion de media. Son vehiculos con un consumo medio inferior al del cluster 1 y tienen un precio medio mas bajo. El numero de cilindros suele ser 4, aunque algunos todoterrenos de este grupo tienen 6 cilindros.
+
+Para observar mejor las diferencias, vamos a observar el histograma respecto a potencia:
+```{r, echo=FALSE}
+hist(clusterK1$potencia)
+hist(clusterK2$potencia)
+```
+Observamos unas diferencias notables puesto que la mayoria de todoterrenos del cluster 1 se situan entre los 160 y los 220 CV, mientras que la mayor parte de los miembros del cluster 2 estan entre 90 y 130 CV.
+
+En este sentido vamos estudiar las gamas de modelos de las distintas marcas en función de su pertenecia al clúster 1 (todoterrenos de elevada potencia, cilindrada, velocidad y alto consumo) o al clúster 2 (todoterrenos de potencia, velocidad y consumos medios).
+
+```{r, echo=FALSE}
+tabla1<-table(df_completoK$`dataset_mod$marca`, df_completoK$cluster_kmeans)
+tabla1
+```
+
+Como se puede apreciar en la tabla hay marcas como Suzuki y Nissan con un gran número de modelos y todos ellos pertenecen al cluster 2. Podemos por tanto concluir que son marcas de consumo medio (para este tipo de coches), cilindrada y potencia media baja. Hay marcas con pocos coches todo terreno especializados tambien en el segmento de potencia media. baja como son Asia Motors, Daihatsu, Kia, Lada, Ssanyong y Tata.
+
+Por otro lado hay marcas como Landrover, Mitsubishi, Jeep, Toyota, Opel y Ford que tienen dentro de sus catálogos coches de las 2 categorías, lo que indica que son marcas que tienen un segmento de clientes mas amplio. 
+
+Por último destaca la marca Mercedes pues es la única que tiene todos sus coches dentro del segmento de alta potencia. Lo cual no es algo que nos extraña dado el perfil de clientes, la calidad de los motores y los precios de los todoterreno de esta marca.
+
+#4. Conclusiones
+
+Hemos llevado a cabo un proceso de reduccion de la dimension para pasar de  15 variables, 12 númericas y 3 de tipo nominal, a dos componentes principales resultantes de la combinacion lineal de 10 de las variables numericas, todo plenamente justificado y siguiendo el criterio de parsimonia. 
+
+De todos los metodos empleados para acometer dicho fin, el mas explicativo ha sido el metodo de componentes principales, que ha permitido explicar el 78.54%% de la varianza inicial tras la reduccion de la dimension mencionada. Por tanto, se ha logrado explicar, con exito, las caracteristicas fundamentales de los vehiculos todoterreno reduciendo el numero de variables explicativas. A pesar de esto, los componentes generados son de dificil interpretacion. Adicionalmente y a fin de facilitar la interpretacion de los componentes, se ha propuesto una solucion rotada por el metodo varimax de 3 componentes que, a pesar de reducir la varianza explicada, permite una interpretacion mas sencilla de los componentes principales. Un primer componente asociado a las prestaciones propias del motor, el segundo componente asociado al peso y al precio del vehiculo, y un tercer componente asociado al consumo.
+
+A partir de los componentes principales originados en la solucion no rotada de dos componentes, se ha realizado un analisis cluster para agrupar los vehiculos todoterreno en funcion de sus caracteristicas. Se han identificado, con exito, dos grupos claramente diferenciados que corresponderian a los vehiculos de mas potencia y rendimiento (con un precio medio muy superior) y a los vehiculos mas comunes en cuanto a prestaciones de motor. Esta clasificacion nos ha permitido distinguir las compañias que solo lanzan al mercado todoterrenos de potencia, velocidad y consumos medios, de las que lanzan este tipo de todoterreno pero tambien otros modelos de elevada potencia, cilindrada, velocidad y alto consumo, asi como de una compañia que se posiciona en el mercado por vender exclusivamente todoterrenos del segundo tipo. 
+
+
+#5. Bibliografia
+
+Charrad, M., Ghazzali, N., Boiteau, V. and Niknafs, A. (2015). *Package ‘NbClust’*. [pdf] cran.r-project. Available at: https://cran.r-project.org/web/packages/NbClust/NbClust.pdf [Accessed 4 Jan. 2018].
+
+Daróczi, G. (2015). *Mastering Data Analysis with R*. Birmingham: PACKT Publishing, pp.193-235.
+
+Ibm.com. (n.d.). *IBM Knowledge Center*. [online] Available at: https://www.ibm.com/support/knowledgecenter/es/SSLVMB_22.0.0/com.ibm.spss.statistics.help/spss/base/idh_fact_rot.htm [Accessed 3 Jan. 2018].
+
+Lopez Zafra, J. (2017). *El Analisis Cluster*.  Madrid: Máster en Data Science para Finanzas - CUNEF.
+
+Lopez Zafra, J. (2017). *El análisis cluster. Determinación del número de grupos*.
+
+Support.sas.com. (n.d.). *SAS/STAT(R) 9.2 User's Guide, Second Edition*. [online] Available at: https://support.sas.com/documentation/cdl/en/statug/63033/HTML/default/viewer.htm#statug_factor_sect022.htm [Accessed 3 Jan. 2018].
+
+Tipos de desarrollos y de relación en caja de cambios. (2018). [Blog] *Tecnologia del automovil*. Available at: http://autastec.com/blog/tecnologias-limpias/desarrollos-caja-cambios/ [Accessed 2 Jan. 2018].
+
+Tutorial on 5 Powerful R Packages used for imputing missing values. (2016). [Blog] *Analytics Vidhya*. Available at: https://www.analyticsvidhya.com/blog/2016/03/tutorial-powerful-packages-imputing-missing-values/ [Accessed 28 Dec. 2017].
+
+unioviedo.es. (2018). *El algoritmo k-means aplicado a clasificación y procesamiento de imágenes*. [online] Available at: https://www.unioviedo.es/compnum/laboratorios_py/kmeans/kmeans.html [Accessed 4 Jan. 2018].
+
+Zamora, R., Esnaola, J. and Boccardo, G. (2015). Guía de trabajo en “R”: ANÁLISIS FACTORIAL Y ANÁLISIS DE COMPONENTES PRINCIPALES. Departamento de Sociologia - Universidad de Chile.
+
+#6. Anexo: Código
+
+##6.1. Metodología empleada
+
+##6.1.1 Análisis exploratorio
+
+```{r, eval=FALSE}
+library(foreign) #Cargamos la libreria foreign para importar el fichero de tipo sav
+dataset = read.spss("C:/Users/valen/Desktop/Master Datascience/Tecnicas de reduccion y agrupacion/Practica todoterrenos/tterreno_euro.sav", to.data.frame=TRUE)
+dataset$plazas <- as.numeric(paste(dataset$plazas))
+dataset$cilindro <- as.numeric(paste(dataset$cilindro))
+if(nrow(unique(dataset))== nrow(dataset)){
+  print("No hay duplicados")
+}
+str(dataset)
+```
+
+
+
+
+###6.1.1. Variables numéricas
+
+

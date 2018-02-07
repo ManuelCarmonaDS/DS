@@ -1,0 +1,879 @@
+---
+title: "Practica 2 CLASIFICACION"
+author: "Manuel Carmona Cabello de Alba"
+date: "5 de diciembre de 2017"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+En esta practica llevaremos a cabo una regresion logistica y un analisis discriminante. Los datos que se presentan se corresponden con la valoracion de estudiantes de ADE de una universidad espa√±ola. Se adjunta el cuestionario en el que se especifica el item y la escala utilizada.
+
+Para la regresion logistica se utilizara como variable explicada la P20, en donde tomaremos las siguientes agrupaciones de valores: NO SATISFECHO (DE 0 A 6) Y SATISFECHO (DE 7 A 10). La especificacion del modelo es libre
+
+Para el analisis discriminante, se tomara la misma variable explicada con la misma agrupacion para poder comparar estos resultados con la regresion logistica. Ademas se va a considerar, como ejercicio independiente, una nueva agrupacion con tres grupos: SATISFACCIoN BAJA (0 A 5), SATISFACCIoN MEDIA (6 Y 7) Y SATISFACCIoN ALTA (8 A 10).
+
+
+
+#Preparacion de datos y analisis exploratorio
+
+
+```{r, include=FALSE}
+require(xlsx) #Librerias
+```
+
+
+##Llevamos a cabo la carga de los datos y observamos que tipo de datos tenemos
+```{r chunk0, echo=FALSE}
+datos.raw <- readxl::read_excel('C:/Users/Manuel/Desktop/CUNEF/Tecnicas de clasificacion/PRACTICA 2/Base de datos.xlsx',sheet="Hoja1",na="NS")
+
+datos.raw<-na.omit(datos.raw)
+
+is.data.frame(datos.raw)
+
+summary(datos.raw)
+
+```
+
+##Tratamiento de datos
+- Transformamos la variable a explicar en factor, asi como las variables P3 (mujer, hombre) y P4 (no se ha examinado antes, si se ha examinado antes).
+- Definimos una muestra de train y otra de test (70% train; 30% test)
+- Vemos la estructura de la variable P20 en cada uno de los data frame obtenidos y observamos que la estructura esta balanceada
+```{r chunk1, echo=FALSE}
+
+datos.raw$P20<-replace(datos.raw$P20, datos.raw$P20<7, 1)
+datos.raw$P20<-replace(datos.raw$P20, datos.raw$P20>=7, 2)
+
+datos.raw$P20 <- factor(datos.raw$P20, levels=c(1,2), labels=c("NO SATISFECHO", "SATISFECHO"))
+
+datos.df<-datos.raw
+
+datos.df$P3 <- factor(datos.df$P3, levels=c(1,2), labels=c("Mujer", "Hombre"))
+datos.df$P4 <- factor(datos.df$P4, levels=c(0,1), labels=c("No", "Si"))
+
+```
+
+
+```{r chunk2, echo=FALSE}
+set.seed(1234)
+
+train <- sample(nrow(datos.df), 0.7*nrow(datos.df))
+
+df.train <- datos.df[train,]
+
+df.test <- datos.df[-train,]
+
+```
+
+
+```{r chunk3, echo=FALSE}
+table(df.train$P20)
+
+table(df.test$P20)
+
+```
+
+
+#Regresion logistica
+
+**Explicacion de la tÈcnica a utilizar**: La regresiÛn logÌstica es un tipo de an·lisis de regresiÛn utilizado para predecir el resultado de una variable categÛrica (una variable que puede adoptar un n˙mero limitado de categorÌas) en funciÛn de las variables independientes o predictoras.
+
+##Estimacion del modelo
+
+Estimamos el modelo de regresion logistica. Para ello utilizaremos la funcion step, que permite descartar aquellas variables que no aportan valor a la explicacion de la variable P20 y, por tanto, nos permite quedarnos con el mejor modelo posible para las variables dadas. 
+```{r chunk4, include=FALSE}
+fit.logit <- step(glm(P20~., data=df.train, family=binomial()))
+summary(fit.logit)
+```
+
+El modelo que obtenemos es el siguiente:
+```{r }
+summary(fit.logit)
+```
+*Rechazamos que el coeficiente beta es 0 y declaramos la variable significativa cuando el p-valor es menor que 0.05.* 
+
+Como podemos observar, la pregunta de la encuesta que mas explica el nivel de satisfaccion de los alumnos es P6, que hace referencia al nivel de preparacion de las clases del profesor. La segunda pregunta mas significativa de cara a explicar el nivel de satisfaccion de los alumnos es la P18, que hace referencia a la preocupacion del profesor por saber si lo que explica en clase es entendido por los alumnos. Otras preguntas importantes son la P9 (claridad con la que explica el profesor), P13 (cuanto contribuye el profesor a aumentar mi interes por la asignatura) y P19 (del 1 al 10 cuanto interesa ir a clase si quiero preparar bien la asignatura). 
+
+
+##Interpretacion de resultados
+
+Como estamos calculando el odd ratio, para saber los verdaderos valores tenemos que transformar los coeficientes del modelo, tal que:
+```{r}
+e=exp(fit.logit$coefficients)
+e
+```
+Dada que la unidad de medida es la unidad, lo que observamos es que el hecho de que un alumno responda n+1 en lugar de n a la pregunta 6, incrementa un 66% la probabilidad de que ese alumno sea un alumno satisfecho frente a la de que sea un alumno no satisfecho. Del mismo modo, si sabemos que un alumno contesta n+1 en lugar de n a la pregunta 18 implica que la probabilidad de que ese alumno sea uno satisfecho incrementa en un 54% respecto a un alumno que haya contestado n (ceteris paribus).
+
+
+Vamos a llevar a cabo la prediccion con la muestra de validacion. En dicha prediccion asignamos a individuos CON probabilidades mayores que 0.5 la categoria SATISFECHO, y al contrario. El output tabla logit.perf  compara los valores poblacionales y las predicciones de la muestra de test.
+```{r chunk5, echo=FALSE}
+prob <- predict(fit.logit, df.test, type="response")
+
+logit.pred <- factor(prob > .5, levels=c(FALSE, TRUE), labels=c("NO SATISFECHO", "SATISFECHO"))
+
+# Creamos una tabla que relaciona valores poblaciones y predicciones de la muestra de validaci?n
+
+logit.perf <- table(df.test$P20, logit.pred, dnn=c("Actual", "Predicted"))
+
+logit.perf
+```
+Como podemos observar, el modelo tiene 9 errores en 129 predicciones, un 6.97% de error. 
+
+
+##ANOVA 
+Vamos a analizar la varianza mediante un test ANOVA:
+```{r chunk6, echo=FALSE}
+anova(fit.logit, test="Chisq")
+```
+Analizando la tabla podemos comprobar como la desviacion va reduciendose conforme agregamos cada variable de una en una. Claramente las reducciones de desviacion residual las protagonizan p6 y p9. El resto de variables mejorar el modelo aunque de forma menos significativa. 
+Cuanto mas grande es el p-valor aqui, menos explicativa es la variable en cuestion respecto de la variable a explicar. En otras palabras, cuando el p-valor para una variable es muy grande el modelo explicarra practicamente lo mismo sin contar con ella. 
+
+
+
+
+##Bondad del ajuste
+
+Vamos a aplicar sobre el modelo, de la mano de la funcion pR2, una serie de contrastes para indicar la validez predictiva del modelo:
+```{r, echo=FALSE}
+library(pscl)
+pR2(fit.logit)
+```
+Aunque no existe un equivalente exacto al R2 de regresion lineal, el indice McFadden R2 se puede usar para evaluar el ajuste del modelo. Si el Indice de cocientes de verosimilitudes o R2 de McFadden toma valores prÛximos a 0, indica que el modelo planteado apenas tiene ganancia explicativa (puesto que L???L(0)). Valores cercanos a 1 indican mejor ajuste y, por tanto, mejor capacidad predictiva del modelo. 
+
+La bondad del ajuste en los modelos de regresion logistica suele ser muy baja (en torno a 0.40 como maximo). En este sentido, parece que nuestro modelo responde bastante bien. 
+
+
+###Prediccion en la muestra de test
+Tras una evaluacion del ajuste del modelo, veremos como funciona el modelo al predecir en un nuevo conjunto de datos.Al establecer el tipo de parametro = 'response', R generara probabilidades en la forma de P (y = 1 | X).
+Nuestro limite de decision sera 0.5. Si P (y = 1 | X)> 0.5 entonces y = 1, de lo contrario y = 0.
+
+Asi, asignamos a individuos CON probabilidades mayores que 0.5 la categoria SATISFECHO, y al contrario. El output tabla logit.perf  compara los valores poblacionales y las predicciones de la muestra de test.
+```{r, echo=FALSE}
+
+prob <- predict(fit.logit, df.test, type="response")
+
+logit.pred <- factor(prob > .5, levels=c(FALSE, TRUE), labels=c("NO SATISFECHO", "SATISFECHO"))
+
+# Creamos una tabla que relaciona valores poblaciones y predicciones de la muestra de validaci?n
+
+logit.perf <- table(df.test$P20, logit.pred, dnn=c("Actual", "Predicted"))
+
+logit.perf
+
+misClasificError <- mean(logit.pred != df.test$P20)
+print(paste('Accuracy',1-misClasificError))
+```
+Como podemos observar, el modelo tiene 9 errores en 129 predicciones, un 6.97% de error y, por tanto, un Accuracy del 93%. 
+
+
+##Mejora del modelo de regresiÛn
+
+Esta parte tiene sentido en casos de fraude, deteccion de cancer... siempre que un error pese mas que otro. 
+```{r}
+#Funcion de coste
+searchgrid = seq(0.01, 0.5, 0.01)
+result = cbind(searchgrid, NA)
+cost1 <- function(r, pi){
+        weight1 = 1
+        weight0 = 1
+        c1 = (r==2)&(pi<pcut) #logical vector - true if actual 1 but predict 0
+        c0 = (r==1)&(pi>pcut) #logical vector - true if actual 0 but predict 1
+        return(mean(weight1*c1+weight0*c0))
+}
+
+
+```
+
+
+```{r}
+#BEST CUT OFF PROB
+df.train.num<-df.train
+df.train.num$P20<-as.numeric(df.train$P20)
+regresion_logit.pred_in=predict(fit.logit, df.train.num, type="response")
+for(i in 1:length(searchgrid)) {
+        pcut <- result[i,1]
+        result[i,2] <- cost1(df.train.num$P20, as.numeric(regresion_logit.pred_in)) #assign the cost to the 2nd col
+}
+plot(result, ylab="CV Cost")
+```
+
+
+
+Probamos como predice nuestro modelo inicial fuera de la muestra de train:
+```{r}
+#ahora con 0.7
+regresion_logit.pred=predict(fit.logit, df.test, type="response")
+glm.pred<- rep("No", 63)
+glm.pred[regresion_logit.pred  > .5] = "Yes" # Reemplazar NO por YES cuando la probabilidad es mayor del 50%
+Accuracy<-mean(glm.pred == df.test$P20)
+Error<-1-mean(glm.pred == df.test$P20)
+
+```
+
+Obtenemosla matriz de confusion, error, accuracy, sensitivity, y specificity
+```{r}
+#Matriz confusion
+regresion_logit.pred=predict(fit.logit, df.test, type="response")
+predicted.logit.outsample <- regresion_logit.pred > 0.5
+predicted.logit.outsample <- as.numeric(predicted.logit.outsample)
+matrizconf1<-table(df.test$P20, predicted.logit.outsample, dnn=c("Truth","Predicted"))
+matrizconf1
+
+
+
+accuracy1<- (matrizconf1[1]+matrizconf1[4])/nrow(df.test) 
+sensitivity1 <- matrizconf1[4]/(matrizconf1[2]+matrizconf1[4]) #Los que he dicho que si / todos los que si
+specifity1 <- matrizconf1[1]/(matrizconf1[1]+matrizconf1[3]) #los que he dicho que no / todos los que no
+
+
+print(paste("Accuracy:", accuracy1))
+print(paste("Error:", 1 - accuracy1))
+print(paste("Specifity:", specifity1))
+print(paste("Sensitivity:", sensitivity1))
+
+```
+
+
+
+#Analisis discriminante
+
+**ExplicaciÛn de la tÈcnica utilizada**: Partimos de la definiciÛn de una variable explicada que tiene car·cter categÛrico cuyas posibles alternativas, en general, ser·n q categorÌas. Asimismo, se proponen un conjunto de variables explicativas que, por su funciÛn dentro del an·lisis, denotaremos como clasificadoras o predictoras. El an·lisis discriminante representa el mÈtodo o mecanismo a partir del cual se produce la asignaciÛn de los individuos de la muestra, en funciÛn de los valores de las variables explicativas, a una de las categorÌas de la variable explicada. 
+Los objetivos de llevar a cabo el analisis discriminante son de dos tipos:
+        A) Explicativos: analizar la contribucion de cada variable predictora o clasificadora en la funcion discriminante.
+        B) Predictivos: determinar que grupo o categoria se asigna a cada individuo o caso.
+
+
+
+```{r}
+library(dplyr)
+library(mvnormtest)
+library(dplyr)
+library(ggplot2)
+library(data.table)
+```
+
+#øPodemos llevar a cabo el an·lisis discriminante?
+
+```{r}
+grupo_satisfecho <- df.train %>% 
+  filter(P20 == "SATISFECHO") %>% 
+  select(P6,P9,P13,P18,P19)
+```
+
+```{r}
+grupo_no_satisfecho <- df.train %>% 
+  filter(P20 == "NO SATISFECHO") %>% 
+  select(P6,P9,P13,P18,P19)
+```
+
+
+##Hipotesis para que la funcion sea optima
+
+##Normalidad
+
+**Satisfechos**:
+```{r}
+mshapiro.test(t(grupo_satisfecho))
+```
+
+**No Satisfechos**:
+```{r}
+mshapiro.test(t(grupo_no_satisfecho))
+```
+Los P- valores son bajos en ambos grupos por tanto podemos confirmar que en ambos grupos las variables no siguen distribuciones normales.
+
+
+
+##Test de wilks;
+
+Realizamos un Test de Wilks de igualdad de medias
+
+Se debe hacer al principio para ver si las variables discriminan.
+
+La hipotesis nula: Mu1 = M2. Los vectores de medias de ambas grupos son iguales
+La hipotesis alternativa. Mu1 != M2. Los vectores de medias de ambas grupos son distintos
+ y por tanto tiene sentido realizar un an√°lisis discriminante.
+
+
+```{r}
+fit.manova = manova(data=df.train, cbind(df.train$P6,df.train$P9,df.train$P13,df.train$P18,
+                                      df.train$P19)~df.train$P20)
+```
+
+```{r}
+summary((fit.manova),test="Wilks")
+```
+
+El resultado del test es positivo (p-valor > 0.05) por tanto tiene sentido realizar analisis discriminante.
+
+
+<!-- ##Homocedasticidad: -->
+
+<!-- Procederemos a ver si se cumple la hipotesis de homocedasticidad -->
+<!-- ```{r} -->
+<!-- df.train.mod <- df.train %>%  -->
+<!--   select(P6,P9,P13,P18,P19,P20) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- df.train.mod$P20 <- ifelse(df.train.mod$P20=="SATISFECHO",1,2) -->
+<!-- ``` -->
+
+
+<!-- ```{r} -->
+<!-- df.train.mod2 <- as_tibble(df.train.mod) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- str(df.train.mod2) -->
+<!-- ``` -->
+
+
+<!-- ```{r} -->
+<!-- df.train.mod2 <- filter_all(df.train.mod2,all_vars(. > 0)) -->
+<!-- ``` -->
+
+
+<!-- Test de BOX para ver si se cumple la hipot√©sis de homocedasticidad  -->
+
+<!-- ```{r} -->
+<!-- boxM(df.train.mod2[,-6],df.train.mod2[,6]) -->
+<!-- ``` -->
+
+
+
+
+
+<!-- ##Contraste de medias para cada uno de los grupos: -->
+
+<!-- Calculamos las medias para cada uno de los tipos -->
+<!-- ```{r} -->
+<!-- m1 <- apply(grupo_satisfecho,2,mean) -->
+<!-- m2 <- apply(grupo_no_satisfecho,2,mean) -->
+<!-- ``` -->
+
+<!-- La longitud de cada uno de los grupos -->
+<!-- ```{r} -->
+<!-- l1 <- length(grupo_satisfecho) -->
+<!-- l2 <- length(grupo_no_satisfecho) -->
+<!-- ``` -->
+
+<!-- Estimacion de la matriz de varianzas-covarianzas -->
+<!-- ```{r} -->
+<!-- S123 <- ((l1-1)*var(grupo_satisfecho)+(l2-1)*var(grupo_no_satisfecho))/(l1+l2-2) -->
+<!-- ``` -->
+
+
+<!-- Contraste de medias para comprobar si las medias son diferentes de manera significativa o no -->
+<!-- ```{r} -->
+<!-- T2 <- t(m1-m2)%*%solve(S123)%*%(m1-m2) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- Fstat <- (l1*l2/(l1+l2))*(l1+l2-5-1)*T2/(l1+l2-2)*5 -->
+<!-- pvalue <- 1-pf(Fstat,5,26) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- Fstat -->
+<!-- pvalue -->
+<!-- ``` -->
+
+<!-- Como podemos apreciar el Pvalor es muy bajo, por tanto podemos rechazar la hipotesis de que las medias son iguales y concluir que las medias de las variables son distintas en los dos grupos. Que es el primer paso para poder realizar el ananlisis discriminante.  -->
+
+
+
+Observamos la relacion entre las variables:
+```{r, echo=FALSE}
+library(car)
+scatterplotMatrix(datos.df[3:15])
+
+```
+Observamos una relacion lineal entre las variables. 
+
+##LDA
+Realizamos el analisis discriminante
+```{r, echo=FALSE}
+library(MASS)
+lda1 = lda(P20~P6+P9+P13+P18+P19, df.train)
+lda1
+predict.lda1 <- predict(lda1, df.test, type="response"
+                                                )
+tabla.lda1 <- table(df.test$P20, predict.lda1$class, dnn=c("Actual", "Predicted"))
+tabla.lda1
+```
+El modelo da un accuracy del 90.69%. A priori, la probabilidad de que un alumno se clasifique dentro del grupo de los NO SATISFECHOS es del ~40%, mientras que la probabilidad de que se clasifique en el grupo de SATISFECHOS es del ~60%
+
+##QDA
+Ahora vamos a probar con la funcion cuadratica discriminante. En lugar de utilizar una funcion lineal utilizaremos una funcion cuadratica (parabola). Al no existir evidencia teorica de cuando es mejor usar un tipo u otro, probaremos con ambos para ver cual funciona mejor.
+
+```{r, echo=FALSE}
+library(MASS)
+qda1 = qda(P20~P6+P9+P13+P18+P19, df.train)
+qda1
+predict.qda1 <- predict(qda1, df.test, type="response")
+                        
+                        
+tabla.qda1 <- table(df.test$P20, predict.qda1$class, dnn=c("Actual", "Predicted"))
+tabla.qda1
+```
+Las probabilidades a priori son parecidas. El modelo tiene un accuracy de 92.24%. El rendimiento de este modelo es mejor que el del modelo lineal para esta muestra.
+
+
+
+###Representacion
+A modo ilustrativo, vamos a representar como clasifican las variables para ver la diferencia de las variables a la hora de clasificar segun si el modelo es lineal o no. Haremos zoom en P6 
+y P18 para observarlo de forma mas clara. 
+```{r, echo=FALSE}
+library(klaR)
+
+partimat(P20~P6+P18,data=datos.df,method="lda") 
+
+partimat(P20~P6+P18,data=datos.df,method="qda")
+
+partimat(P20~P6+P9+P13+P18+P19,data=datos.df,method="lda") 
+
+partimat(P20~P6+P9+P13+P18+P19,data=datos.df,method="qda") 
+
+```
+Observamos como el modelo lineal tiene un error ligeramente mas alto (0.148 vs 0.141), en linea con lo anterior.
+
+
+##Que modelo es mejor clasificando un nuevo alumno segun su encuesta?
+
+Estimaremos el modelo seleccionando aleatoriamente el 70% de los estudiantes, estimando los parametros sobre la muestra de aprendizaje, y clasificando la muestra de test del 20% de los estudiantes. Repetiremos el proceso 150 veces para asegurar que los resultados no estan condicionados por la muestra.
+
+```{r, echo=FALSE}
+n=427 
+
+nt=300 #el 70% de los estudiantes
+
+neval=n-nt
+
+rep=150
+```
+
+
+###LDA
+```{r, echo=FALSE}
+set.seed(1234)
+
+errlin=dim(rep)
+
+for (k in 1:rep) {
+        train=sample(1:n,nt)
+## linear discriminant analysis
+        m1B=lda(P20~P6+P9+P13+P18+P19,datos.df[train,])
+        predict(m1B,datos.df[-train,])$class
+        tablin=table(datos.df$P20[-train],predict(m1B,datos.df[-train,])$class)
+        errlin[k]=(neval-sum(diag(tablin)))/neval
+}
+merrlin=mean(errlin)  #tasa media de error
+merrlin
+```
+Observamos que la tasa media de error ronda el 10%
+
+
+###QDA
+```{r, echo=FALSE}
+set.seed(1234)
+
+errqda=dim(rep)
+
+for (k in 1:rep) {
+        train=sample(1:n,nt)
+## quatratic discriminant analysis
+        m2B=qda(P20~P6+P9+P13+P18+P19,datos.df[train,])
+        predict(m2B,datos.df[-train,])$class
+        tabqda=table(datos.df$P20[-train],predict(m2B,datos.df[-train,])$class)
+        errqda[k]=(neval-sum(diag(tabqda)))/neval
+}
+merrqda=mean(errqda)  #tasa media de error
+merrqda
+```
+Observamos que la tasa media de error es del 13%.
+
+En este sentido, la tasa media de error es superior en el modelo no linear. Parece que el modelo de funciones lineales da menos error y, por tanto, es mejor para clasificar un alumno en base a su encuesta. 
+
+
+
+#EJERCICIO INDEPENDIENTE - ANALISIS DISCRIMINANTE, V2
+
+*Vamos a considerar, como ejercicio independiente, una nueva agrupacion con tres grupos: SATISFACCION BAJA (0 A 5), SATISFACCION MEDIA (6 Y 7) Y SATISFACCION ALTA (8 A 10)*
+
+Procedemos al tratamiento de los datos del mismo modo que hicimos anteriormente, pero con unas modificaciones:
+- Hacemos la modificacion en la variable P20 de acuerdo a los nuevos criterios, es decir, teniendo en cuenta los tres niveles de satisfacci√≥n: "SATISFACCION BAJA", "SATISFACCION MEDIA","SATISFACCION ALTA".
+```{r, include=FALSE}
+datos2 <- readxl::read_excel('C:/Users/Manuel/Desktop/CUNEF/Tecnicas de clasificacion/PRACTICA 2/Base de datos.xlsx',sheet="Hoja1",na="NS")
+
+datos2<-na.omit(datos2)
+
+is.data.frame(datos2)
+
+summary(datos2)
+```
+
+
+```{r, echo=FALSE}
+datos2$P20<-replace(datos2$P20, datos2$P20<=5, 1)
+datos2$P20<-replace(datos2$P20, datos2$P20==7, 2)
+datos2$P20<-replace(datos2$P20, datos2$P20==6, 2)
+datos2$P20<-replace(datos2$P20, datos2$P20>=8, 3)
+
+datos2$P20 <- factor(datos2$P20, levels=c(1,2,3), labels=c("SATISFACCION BAJA", "SATISFACCION MEDIA","SATISFACCION ALTA"))
+
+datos.df2<-datos2
+
+datos.df2$P3 <- factor(datos.df2$P3, levels=c(1,2), labels=c("Mujer", "Hombre"))
+datos.df2$P4 <- factor(datos.df2$P4, levels=c(0,1), labels=c("No", "Si"))
+```
+
+
+```{r, echo=FALSE}
+set.seed(1234)
+
+train2 <- sample(nrow(datos.df2), 0.7*nrow(datos.df2))
+
+df.train2 <- datos.df2[train2,]
+
+df.test2 <- datos.df2[-train2,]
+
+```
+
+
+```{r, echo=FALSE}
+table(df.train2$P20)
+
+table(df.test2$P20)
+```
+
+##LDA
+Procedemos a estimar el modelo LDA
+```{r, echo=FALSE}
+lda2 = lda(P20~P6+P9+P13+P18+P19, df.train2)
+lda2
+predict.lda2 <- predict(lda2, df.test2, type="response")
+tabla.lda2 <- table(df.test2$P20, predict.lda2$class, dnn=c("Actual", "Predicted"))
+tabla.lda2
+```
+EL accuracy que obtenemos es 82.17%, inferior al del ejercicio anterior.
+
+
+##QDA
+```{r, echo=FALSE}
+library(MASS)
+qda2 = qda(P20~P6+P9+P13+P18+P19, df.train2)
+qda2
+predict.qda2 <- predict(qda2, df.test2, type="response")
+
+tabla.qda2 <- table(df.test2$P20, predict.qda2$class, dnn=c("Actual", "Predicted"))
+tabla.qda2
+```
+El accuracy del modelo QDA es de 72.86%, menor que el del ejercicio anterior. Ademas, si lo comparamos con el modelo lineal utilizado para discriminar entre los 3 niveles de satisfaccion, observamos que este modelo es peor para predecir. 
+
+
+
+##Representacion
+Mediante una representacion podemos ver de forma mas ilustrativa como clasifican las 2 funciones del modelo LDA:
+```{r, echo=FALSE}
+#histogramas
+library(MASS)
+lda2.values=predict(lda2)
+ldahist(data = lda2.values$x[,1], g=lda2.values$class)
+ldahist(data = lda2.values$x[,2], g=lda2.values$class)
+
+#partition plots
+library(klaR)
+partimat(P20~P6+P9+P13+P18+P19,data=datos.df2,method="lda") 
+partimat(P20~P6+P9+P13+P18+P19,data=datos.df2,method="qda") 
+
+```
+
+- Hemos representado los histogramas asociados al modelo de mayor accuracy (lda). Como vemos existe solapamiento entre los grupos.
+
+- La primera funcion discriminante es la principal mientras que la segunda discriminante es complementaria a la primera pero produce mucho solapamiento entre grupos.La primera permite clasificar por si sola (con mayor error obviamente), pero la segunda es puramente complementaria. 
+
+- Observamos como en este caso los partition plots se dividen en 3 partes, debido a que existen 2 funciones (lineales o cuadraticas). 
+
+
+
+
+
+##Que modelo es mejor clasificando un nuevo alumno segun su encuesta?
+
+Estimaremos el modelo seleccionando aleatoriamente el 70% de los estudiantes, estimando los parametros sobre la muestra de aprendizaje, y clasificando la muestra de test del 20% de los estudiantes. Repetiremos el proceso 150 veces para asegurar que los resultados no estan condicionados por la muestra.
+
+```{r, echo=FALSE}
+n=427 
+
+nt=300 #el 70% de los estudiantes
+
+neval=n-nt
+
+rep=150
+```
+
+```{r}
+library(MASS)
+```
+
+###LDA
+```{r, echo=FALSE}
+set.seed(1234)
+
+errlin=dim(rep)
+
+for (k in 1:rep) {
+        train=sample(1:n,nt)
+## linear discriminant analysis
+        m1B2=lda(P20~P6+P9+P13+P18+P19,datos.df2[train,])
+        predict(m1B2,datos.df2[-train,])$class
+        tablin=table(datos.df2$P20[-train],predict(m1B2,datos.df2[-train,])$class)
+        errlin[k]=(neval-sum(diag(tablin)))/neval
+}
+merrlin=mean(errlin)  #tasa media de error
+merrlin
+```
+Observamos que la tasa media de error ronda el 22%
+
+
+
+
+###QDA
+```{r, echo=FALSE}
+set.seed(1234)
+
+errqda=dim(rep)
+
+for (k in 1:rep) {
+        train=sample(1:n,nt)
+## quatratic discriminant analysis
+        m2B2=qda(P20~P6+P9+P13+P18+P19,datos.df2[train,])
+        predict(m2B2,datos.df2[-train,])$class
+        tabqda=table(datos.df2$P20[-train],predict(m2B2,datos.df2[-train,])$class)
+        errqda[k]=(neval-sum(diag(tabqda)))/neval
+}
+merrqda=mean(errqda)  #tasa media de error
+merrqda
+```
+Observamos que la tasa media de error es del 27%
+
+En este sentido, la tasa media de error es superior en el modelo no linear. Parece que el modelo de funciones lineales da menos error y, por tanto, es mejor para clasificar un alumno en base a su encuesta. 
+
+
+#Conclusion final
+
+Como hemos observado a lo largo de la practica, distintos metodos llevan a distintos resultados. Se ha puesto de manifiesto, para este caso concreto, una mayor capacidad de acierto de la regresion logistica frente al analisis discriminante con dos y tres poblaciones. 
+
+El analisis discriminante con dos poblaciones ha resultado ser mas efectivo que el analisis discriminate con tres niveles de satisfaccion, algo que es logico si consideramos la mayor dificultad de hacer distinciones entre tres tipos de alumno (requiere delimitar dos fronteras entre grupos) frente a hacerlo entre dos tipos (satisfecho vs no satisfecho). 
+
+
+
+#ANEXO: codigo
+
+```{r, eval=FALSE}
+datos.raw <- readxl::read_excel('C:/Users/Manuel/Desktop/CUNEF/Tecnicas de clasificacion/PRACTICA 2/Base de datos.xlsx',sheet="Hoja1",na="NS")
+
+datos.raw<-na.omit(datos.raw)
+
+is.data.frame(datos.raw)
+
+summary(datos.raw)
+```
+
+```{r, eval=FALSE}
+datos.raw$P20<-replace(datos.raw$P20, datos.raw$P20<7, 1)
+datos.raw$P20<-replace(datos.raw$P20, datos.raw$P20>=7, 2)
+
+datos.raw$P20 <- factor(datos.raw$P20, levels=c(1,2), labels=c("NO SATISFECHO", "SATISFECHO"))
+
+datos.df<-datos.raw
+
+datos.df$P3 <- factor(datos.df$P3, levels=c(1,2), labels=c("Mujer", "Hombre"))
+datos.df$P4 <- factor(datos.df$P4, levels=c(0,1), labels=c("No", "Si"))
+
+set.seed(1234)
+
+train <- sample(nrow(datos.df), 0.7*nrow(datos.df))
+
+df.train <- datos.df[train,]
+
+df.test <- datos.df[-train,]
+
+table(df.train$P20)
+
+table(df.test$P20)
+```
+
+
+
+**Modelo GLM**
+```{r, eval=FALSE}
+fit.logit <- step(glm(P20~., data=df.train, family=binomial()))
+summary(fit.logit)
+```
+
+```{r, eval=FALSE}
+library(pscl)
+pR2(fit.logit)
+
+prob <- predict(fit.logit, df.test, type="response")
+
+logit.pred <- factor(prob > .5, levels=c(FALSE, TRUE), labels=c("NO SATISFECHO", "SATISFECHO"))
+
+# Creamos una tabla que relaciona valores poblaciones y predicciones de la muestra de validaci?n
+
+logit.perf <- table(df.test$P20, logit.pred, dnn=c("Actual", "Predicted"))
+
+logit.perf
+
+misClasificError <- mean(logit.pred != df.test$P20)
+print(paste('Accuracy',1-misClasificError))
+
+```
+
+
+
+**Analisis discriminante**
+```{r, eval=FALSE}
+
+
+library(car)
+scatterplotMatrix(datos.df[3:15])
+
+library(MASS)
+lda1 = lda(P20~P6+P9+P13+P18+P19, df.train)
+lda1
+predict.lda1 <- predict(lda1, df.test, type="response"
+                                                )
+tabla.lda1 <- table(df.test$P20, predict.lda1$class, dnn=c("Actual", "Predicted"))
+tabla.lda1
+
+qda1 = qda(P20~P6+P9+P13+P18+P19, df.train)
+qda1
+predict.qda1 <- predict(qda1, df.test, type="response"
+                        
+                        )
+tabla.qda1 <- table(df.test$P20, predict.qda1$class, dnn=c("Actual", "Predicted"))
+tabla.qda1
+
+library(klaR)
+
+partimat(P20~P6+P18,data=datos.df,method="lda") 
+
+partimat(P20~P6+P18,data=datos.df,method="qda")
+
+partimat(P20~P6+P9+P13+P18+P19,data=datos.df,method="lda") 
+
+partimat(P20~P6+P9+P13+P18+P19,data=datos.df,method="qda") 
+
+n=427 #el 80% de os estudiantes
+
+nt=300 #el 20% de los estudiantes
+
+neval=n-nt
+
+rep=150
+
+set.seed(1234)
+
+errlin=dim(rep)
+
+for (k in 1:rep) {
+        train=sample(1:n,nt)
+## linear discriminant analysis
+        m1B=lda(P20~P6+P9+P13+P18+P19,datos.df[train,])
+        predict(m1B,datos.df[-train,])$class
+        tablin=table(datos.df$P20[-train],predict(m1B,datos.df[-train,])$class)
+        errlin[k]=(neval-sum(diag(tablin)))/neval
+}
+merrlin=mean(errlin)  #tasa media de error
+merrlin
+
+set.seed(1234)
+
+errqda=dim(rep)
+
+for (k in 1:rep) {
+        train=sample(1:n,nt)
+## linear discriminant analysis
+        m2B=qda(P20~P6+P9+P13+P18+P19,datos.df[train,])
+        predict(m2B,datos.df[-train,])$class
+        tabqda=table(datos.df$P20[-train],predict(m2B,datos.df[-train,])$class)
+        errqda[k]=(neval-sum(diag(tabqda)))/neval
+}
+merrqda=mean(errqda)  #tasa media de error
+merrqda
+
+
+```
+
+**Ejercicio independiente**
+```{r, eval=FALSE}
+datos2 <- readxl::read_excel('C:/Users/Manuel/Desktop/CUNEF/Tecnicas de clasificacion/PRACTICA 2/Base de datos.xlsx',sheet="Hoja1",na="NS")
+
+datos2<-na.omit(datos2)
+
+is.data.frame(datos2)
+
+summary(datos2)
+
+
+datos2$P20<-replace(datos2$P20, datos2$P20<=5, 1)
+datos2$P20<-replace(datos2$P20, datos2$P20==7, 2)
+datos2$P20<-replace(datos2$P20, datos2$P20==6, 2)
+datos2$P20<-replace(datos2$P20, datos2$P20>=8, 3)
+
+datos2$P20 <- factor(datos2$P20, levels=c(1,2,3), labels=c("SATISFACCION BAJA", "SATISFACCION MEDIA","SATISFACCION ALTA"))
+
+datos.df2<-datos2
+
+datos.df2$P3 <- factor(datos.df2$P3, levels=c(1,2), labels=c("Mujer", "Hombre"))
+datos.df2$P4 <- factor(datos.df2$P4, levels=c(0,1), labels=c("No", "Si"))
+
+
+set.seed(1234)
+
+train2 <- sample(nrow(datos.df2), 0.7*nrow(datos.df2))
+
+df.train2 <- datos.df2[train2,]
+
+df.test2 <- datos.df2[-train2,]
+
+table(df.train2$P20)
+
+table(df.test2$P20)
+
+
+lda2 = lda(P20~P6+P9+P13+P18+P19, df.train2)
+lda2
+predict.lda2 <- predict(lda2, df.test2, type="response")
+tabla.lda2 <- table(df.test2$P20, predict.lda2$class, dnn=c("Actual", "Predicted"))
+tabla.lda2
+
+
+library(MASS)
+qda2 = qda(P20~P6+P9+P13+P18+P19, df.train2)
+qda2
+predict.qda2 <- predict(qda2, df.test2, type="response"
+                        
+                        )
+tabla.qda2 <- table(df.test2$P20, predict.qda2$class, dnn=c("Actual", "Predicted"))
+tabla.qda2
+
+#histogramas
+library(MASS)
+lda2.values=predict(lda2)
+ldahist(data = lda2.values$x[,1], g=lda2.values$class)
+ldahist(data = lda2.values$x[,2], g=lda2.values$class)
+
+#partition plots
+library(klaR)
+partimat(P20~P6+P9+P13+P18+P19,data=datos.df2,method="lda") 
+partimat(P20~P6+P9+P13+P18+P19,data=datos.df2,method="qda") 
+```
+
+
+
